@@ -1,6 +1,8 @@
 import type { QuestionContent } from "./questionnaire.js";
 import type { FactoryPlan } from "./plans.js";
 import type {
+  AuthoringLaneAction,
+  AuthoringLaneFinding,
   ScriptEffectSuggestion,
   SkillScriptSideEffect,
 } from "@realityjunky/badger";
@@ -83,6 +85,14 @@ export interface PlanDraftingJob extends Omit<
   roundId: null;
   result: { plan: FactoryPlan } | null;
   review: DraftingReview<{ plan: FactoryPlan }> | null;
+  authoringFollowUp?: {
+    jobId: string;
+    lane: string;
+    resultHash: string;
+    action: AuthoringLaneAction;
+    findings: AuthoringLaneFinding[];
+    basePlanVersionId: string;
+  };
 }
 export interface AuthoringDraftingJob extends Omit<
   DraftingJob,

@@ -4,6 +4,10 @@ import {
   deriveFactoryPlan,
   type AuthoringPlan,
   type AuthoringHandoff,
+  type AuthoringLaneAction,
+  type AuthoringLaneFinding,
+  type AuthoringLaneId,
+  type FactoryPlan,
   type PromptTemplateSnapshot,
 } from "@realityjunky/badger";
 import { planInputs, readPlanHead } from "../plans.js";
@@ -105,6 +109,15 @@ export type DraftingBundle = Awaited<
   ReturnType<typeof draftingContext>
 >["bundle"] & {
   promptTemplate?: PromptTemplateSnapshot;
+  authoringFollowUp?: {
+    jobId: string;
+    packageId: string;
+    lane: AuthoringLaneId;
+    resultHash: string;
+    action: AuthoringLaneAction;
+    findings: AuthoringLaneFinding[];
+    basePlan: { id: string; hash: string; plan: FactoryPlan };
+  };
   authoring?: {
     packageId: string;
     lane: string;

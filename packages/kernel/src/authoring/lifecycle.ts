@@ -55,6 +55,7 @@ import type {
   AuthoringLaneId,
   AuthoringPlan,
   AuthoringReadiness,
+  AuthoringRepairTarget,
   AuthoringRecoveryInfo,
   AuthoringRecord,
   AuthoringRecordInput,
@@ -81,7 +82,7 @@ import type {
 } from "./types.js";
 import type { GeneratedPackage } from "../factory/generate.js";
 
-export const AUTHORING_GENERATOR_CONTRACT_VERSION = 2 as const;
+export const AUTHORING_GENERATOR_CONTRACT_VERSION = 3 as const;
 export const AUTHORING_INPUT_LIMIT_BYTES = 16 * 1024 * 1024;
 const MAX_SUMMARY_BYTES = 8 * 1024;
 const MAX_ARTIFACT_BYTES = 64 * 1024;
@@ -1822,6 +1823,61 @@ function normalizedReview(
   return value as unknown as AuthoringReviewOutput;
 }
 
+function dossierField(pointer: string, dossier: unknown): boolean {
+  if (!/^\/(?:[^/~]+\/)*[^/~]+$/u.test(pointer)) return false;
+  return pointer
+    .slice(1)
+    .split("/")
+    .every((key) => {
+      if (
+        !dossier ||
+        typeof dossier !== "object" ||
+        !Object.hasOwn(dossier, key)
+      )
+        return false;
+      dossier = (dossier as Record<string, unknown>)[key];
+      return true;
+    });
+}
+
+function normalizeRepairTarget(
+  value: unknown,
+  plan: AuthoringPlan,
+): AuthoringRepairTarget {
+  if (isRecord(value)) {
+    switch (value.stage) {
+      case "plan":
+      case "proposal":
+        if (Object.keys(value).length === 1) return { stage: value.stage };
+        break;
+      case "sources":
+        if (
+          Object.keys(value).length === 3 &&
+          boundedText(value.skillId, 200) &&
+          typeof value.skillHash === "string" &&
+          HASH_PATTERN.test(value.skillHash)
+        )
+          return {
+            stage: "sources",
+            skillId: value.skillId,
+            skillHash: value.skillHash,
+          };
+        break;
+      case "dossier":
+        if (
+          Object.keys(value).length === 2 &&
+          boundedText(value.field) &&
+          dossierField(value.field, plan.semanticDossier)
+        )
+          return { stage: "dossier", field: value.field };
+        break;
+    }
+  }
+  throw new Error(
+    "Authoring repair target must name a supported stage and its bound input",
+  );
+}
+
 function normalizeLaneAction(
   value: unknown,
   status: unknown,
@@ -1846,10 +1902,14 @@ function normalizeLaneAction(
     status === "NEEDS_CONTEXT"
       ? "question"
       : status === "BLOCKED"
-        ? "repair"
+        ? value.kind === "bug"
+          ? "bug"
+          : "repair"
         : undefined;
   if (!kind || value.kind !== kind)
     throw new Error("Authoring lane action does not match status");
+  if (value.target !== undefined && kind !== "repair")
+    throw new Error("Only a repair can target an upstream stage");
   if (kind === "question" && plan.semanticDossier) {
     const pointer = value.requirement as string;
     if (!pointer.startsWith("/") || pointer.includes("~"))
@@ -1869,6 +1929,9 @@ function normalizeLaneAction(
     kind,
     prompt: value.prompt as string,
     requirement: value.requirement as string,
+    ...(value.target === undefined
+      ? {}
+      : { target: normalizeRepairTarget(value.target, plan) }),
   };
 }
 
@@ -2325,6 +2388,7 @@ function validAuthoringSummary(value: unknown): value is AuthoringStateSummary {
     Number.isInteger(value.revision) &&
     Number(value.revision) >= 0 &&
     (value.generatorContractVersion === 1 ||
+      value.generatorContractVersion === 2 ||
       value.generatorContractVersion ===
         AUTHORING_GENERATOR_CONTRACT_VERSION) &&
     typeof value.planHash === "string" &&
@@ -3566,7 +3630,14 @@ export async function authoringReadiness(
     state.authoring = authoring;
   }
   const currentInputHash = authoringInputHash(plan);
-  if (authoring.authoringInputHash !== currentInputHash)
+  if (
+    authoring.generatorContractVersion !== AUTHORING_GENERATOR_CONTRACT_VERSION
+  ) {
+    for (const lane of authoringLaneIds()) invalidated.add(lane);
+    blockers.push(
+      "The Badger package generator changed; regenerate the scaffold to continue authoring",
+    );
+  } else if (authoring.authoringInputHash !== currentInputHash)
     blockers.push("Authoring input evidence is stale; regenerate the scaffold");
   if (!HASH_PATTERN.test(authoring.scaffoldHash))
     blockers.push("Authoring scaffold hash is invalid");

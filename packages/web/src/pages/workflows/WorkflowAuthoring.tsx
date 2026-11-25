@@ -1,7 +1,10 @@
 import { Alert, Button, Collapse, Input, Modal, Space, Table, Tag } from "antd";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import type { AuthoringReadiness } from "@realityjunky/badger";
+import { Link, useNavigate } from "react-router-dom";
+import type {
+  AuthoringReadiness,
+  AuthoringRepairTarget,
+} from "@realityjunky/badger";
 import type { AuthoringDraftingJob } from "../../api/drafting-jobs.js";
 import {
   QuestionnaireError,
@@ -13,17 +16,42 @@ import { useI18n } from "../../i18n/I18nContext.js";
 
 type LaneJob = AuthoringDraftingJob & {
   createdAt: string;
-  decision: { decision?: { reason?: string } } | null;
+  decision: {
+    decision?: { reason?: string };
+    followUp?: StageFollowUp;
+  } | null;
 };
+type StageFollowUp = {
+  stage: AuthoringRepairTarget["stage"] | null;
+  targetId: string | null;
+  planDraftId: string | null;
+};
+
+const stageLabels = {
+  plan: "plan.title",
+  sources: "workflow.sources",
+  dossier: "dossier.title",
+  proposal: "proposal.title",
+} as const;
+
+function followUpLocation(jobId: string, followUp: StageFollowUp) {
+  const search = new URLSearchParams({ authoringFinding: jobId });
+  if (followUp.planDraftId) search.set("planDraft", followUp.planDraftId);
+  if (followUp.stage === "dossier" && followUp.targetId)
+    search.set("dossierVersion", followUp.targetId);
+  return { search: search.toString(), hash: followUp.stage ?? "package" };
+}
+
 type View = {
   current: boolean;
   readiness: AuthoringReadiness;
   jobs: LaneJob[];
-  followUps: {
+  followUps: (StageFollowUp & {
+    jobId: string;
     laneId: string;
     questionId: string | null;
     repairJobId: string | null;
-  }[];
+  })[];
 };
 export function WorkflowAuthoring({
   basePath,
@@ -39,6 +67,7 @@ export function WorkflowAuthoring({
   onChanged(): void;
 }) {
   const { t, format, locale } = useI18n();
+  const navigate = useNavigate();
   const [view, setView] = useState<View | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [dialogFailure, setDialogFailure] = useState<{
@@ -152,6 +181,7 @@ export function WorkflowAuthoring({
             job?.status === "queued" &&
             view.followUps.some(({ repairJobId }) => repairJobId === job.id),
           repairRequirement: record?.action?.requirement,
+          bug: record?.action?.kind === "bug" ? record.action : null,
         };
       })
     : [];
@@ -159,6 +189,10 @@ export function WorkflowAuthoring({
     status === "submitted"
       ? t("authoring.submitted")
       : t(`drafting.state.${status}`);
+  const target =
+    decision?.action === "accept"
+      ? decision.job.result?.laneOutput.action?.target
+      : undefined;
   const dialogAlert = dialogFailure && (
     <Alert
       type="error"
@@ -303,7 +337,7 @@ export function WorkflowAuthoring({
               },
               {
                 title: t("authoring.jobStatus"),
-                render: (_, { job, queuedRepair, repairRequirement }) => {
+                render: (_, { job, queuedRepair, repairRequirement, bug }) => {
                   if (!job)
                     return (
                       <span className="muted">{t("authoring.noJob")}</span>
@@ -328,6 +362,19 @@ export function WorkflowAuthoring({
                             </span>
                           )}
                       </Space>
+                      {bug && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          title={t("authoring.badgerBug")}
+                          description={
+                            <>
+                              <div>{bug.requirement}</div>
+                              <div>{bug.prompt}</div>
+                            </>
+                          }
+                        />
+                      )}
                       {canManage && queuedRepair && (
                         <Alert
                           type="info"
@@ -373,14 +420,22 @@ export function WorkflowAuthoring({
             <>
               <h4>{t("authoring.followUps")}</h4>
               <ul>
-                {view.followUps.map((item, i) => (
-                  <li key={i}>
+                {view.followUps.map((item) => (
+                  <li key={item.jobId}>
                     {item.laneId}:{" "}
                     {item.questionId ? (
                       <Link
                         to={`/questionnaire/questions/${encodeURIComponent(item.questionId)}`}
                       >
                         {t("authoring.question")}
+                      </Link>
+                    ) : item.stage ? (
+                      <Link to={followUpLocation(item.jobId, item)}>
+                        {item.stage === "plan"
+                          ? t("authoring.openPlanDraft")
+                          : format("authoring.openStageFinding", {
+                              stage: t(stageLabels[item.stage]),
+                            })}
                       </Link>
                     ) : (
                       <span>
@@ -490,7 +545,11 @@ export function WorkflowAuthoring({
         open={!!decision}
         title={t("authoring.confirmDecision")}
         confirmLoading={busy}
-        okText={t("authoring.confirm")}
+        okText={t(
+          target?.stage === "plan"
+            ? "authoring.confirmOpenPlan"
+            : "authoring.confirm",
+        )}
         onCancel={() => {
           if (busy) return;
           setDecision(null);
@@ -499,7 +558,7 @@ export function WorkflowAuthoring({
         onOk={() =>
           decision &&
           void run(async () => {
-            await request(
+            const { job } = await request<{ job: LaneJob }>(
               `/drafting-jobs/${encodeURIComponent(decision.job.id)}/${decision.action}`,
               "POST",
               {
@@ -512,10 +571,25 @@ export function WorkflowAuthoring({
             setDecision(null);
             setReview(null);
             refresh();
+            if (job.decision?.followUp)
+              navigate(followUpLocation(job.id, job.decision.followUp));
           }, true)
         }
       >
         {dialogAlert}
+        {target && (
+          <p>
+            {target.stage === "plan"
+              ? t("authoring.confirmPlanDraftHelp")
+              : format("authoring.confirmStageFindingHelp", {
+                  stage: t(stageLabels[target.stage]),
+                })}
+          </p>
+        )}
+        {decision?.action === "accept" &&
+          decision.job.result?.laneOutput.action?.kind === "bug" && (
+            <p>{t("authoring.confirmBugHelp")}</p>
+          )}
         <p>
           {decision?.job.laneId} ·{" "}
           {decision?.action === "accept"

@@ -93,6 +93,7 @@ export interface DraftingJobRow {
   created_at: string | Date;
 }
 export function publicDraftingJob(row: DraftingJobRow) {
+  const followUp = row.context_bundle.authoringFollowUp;
   return {
     id: row.id,
     workflowVersionId: row.workflow_version_id,
@@ -150,6 +151,16 @@ export function publicDraftingJob(row: DraftingJobRow) {
             updatedAt: toIsoString(row.review_updated_at!),
           },
     decision: row.decision,
+    ...(followUp && {
+      authoringFollowUp: {
+        jobId: followUp.jobId,
+        lane: followUp.lane,
+        resultHash: followUp.resultHash,
+        action: followUp.action,
+        findings: followUp.findings,
+        basePlanVersionId: followUp.basePlan.id,
+      },
+    }),
     createdAt: toIsoString(row.created_at),
   };
 }
@@ -327,6 +338,7 @@ export async function createDraftingJob(
   versionId: string,
   input: DraftingTarget,
   current: Awaited<ReturnType<typeof draftingContext>>,
+  authoringFollowUp?: DraftingBundle["authoringFollowUp"],
 ) {
   if (input.kind === "draft-plan" && !current.bundle.planning)
     throw new RequestError(
@@ -374,6 +386,7 @@ export async function createDraftingJob(
     );
   const bundle = {
     ...current.bundle,
+    ...(authoringFollowUp && { authoringFollowUp }),
     promptTemplate: await readPromptTemplate(tx, input.kind),
   };
   const job = (

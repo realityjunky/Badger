@@ -341,10 +341,17 @@ export interface AuthoringLaneReviewOutput {
   reviewedAt: string;
 }
 
+export type AuthoringRepairTarget =
+  | { stage: "plan" }
+  | { stage: "sources"; skillId: string; skillHash: string }
+  | { stage: "dossier"; field: string }
+  | { stage: "proposal" };
+
 export interface AuthoringLaneAction {
-  kind: "question" | "repair";
+  kind: "question" | "repair" | "bug";
   prompt: string;
   requirement: string;
+  target?: AuthoringRepairTarget;
 }
 
 export interface AuthoringLaneOutput {
@@ -512,7 +519,7 @@ export interface AuthoringStateSummary {
   planPath: string;
   recordsPath: string;
   revision: number;
-  generatorContractVersion: 1 | 2;
+  generatorContractVersion: 1 | 2 | 3;
   planHash: string;
   protocolHash: string;
   workflowProtocolHash: string;

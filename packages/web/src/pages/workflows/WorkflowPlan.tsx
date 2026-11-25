@@ -32,6 +32,7 @@ import { PlanEditor } from "./PlanEditor.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 import { selectedWorkflowTab } from "./WorkflowTabs.js";
 import { AgentPromptButton } from "../../components/AgentPromptButton.js";
+import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
 
 export function WorkflowPlan({
   basePath,
@@ -49,6 +50,7 @@ export function WorkflowPlan({
   const navigate = useNavigate();
   const active = selectedWorkflowTab(location) === "plan";
   const section = useRef<HTMLElement>(null);
+  const selectedDraftRow = useRef<HTMLLIElement>(null);
   const [view, setView] = useState<PlanView | null>(null);
   const [jobs, setJobs] = useState<PlanDraftingJob[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
@@ -70,7 +72,14 @@ export function WorkflowPlan({
     requestId: string;
   } | null>(null);
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
-  const selectedId = new URLSearchParams(location.search).get("planVersion");
+  const params = new URLSearchParams(location.search);
+  const selectedId = params.get("planVersion");
+  const draftId = params.get("planDraft");
+  const findingId = params.get("authoringFinding");
+  const selectedDraft = jobs.find((job) => job.id === draftId);
+  const visibleJobs = selectedDraft
+    ? [selectedDraft, ...jobs.filter((job) => job.id !== draftId)]
+    : jobs;
   const selected =
     view?.versions.find((v) => v.id === selectedId) ??
     view?.versions.find((v) => v.id === view.headVersionId);
@@ -140,6 +149,10 @@ export function WorkflowPlan({
     if (location.hash === "#plan" && view)
       section.current?.scrollIntoView({ block: "start" });
   }, [location.key, Boolean(view)]);
+  useEffect(() => {
+    if (active && selectedDraft)
+      selectedDraftRow.current?.scrollIntoView({ block: "center" });
+  }, [active, selectedDraft?.id]);
 
   async function changed() {
     setRefresh((r) => r + 1);
@@ -278,6 +291,9 @@ export function WorkflowPlan({
       }
     >
       <p className="muted">{t("plan.description")}</p>
+      {!selectedDraft && (
+        <AuthoringStageFinding basePath={basePath} path={path} stage="plan" />
+      )}
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view && !failure && <Spin aria-label={t("common.loading")} />}
       {view && (
@@ -351,8 +367,28 @@ export function WorkflowPlan({
             <>
               <h3>{t("plan.suggestions")}</h3>
               <ul className="questionnaire-concerns">
-                {jobs.map((job) => (
-                  <li key={job.id}>
+                {visibleJobs.map((job) => (
+                  <li
+                    key={job.id}
+                    ref={job.id === draftId ? selectedDraftRow : undefined}
+                  >
+                    {job.id === draftId && findingId ? (
+                      <AuthoringStageFinding
+                        basePath={basePath}
+                        path={path}
+                        stage="plan"
+                      />
+                    ) : (
+                      job.authoringFollowUp && (
+                        <Alert
+                          type="info"
+                          title={format("authoring.findingOrigin", {
+                            lane: job.authoringFollowUp.lane,
+                          })}
+                          description={job.authoringFollowUp.action.requirement}
+                        />
+                      )
+                    )}
                     <Space wrap>
                       <span>{t("plan.draft")}</span>
                       <Tag>{t(`drafting.state.${job.status}`)}</Tag>

@@ -283,6 +283,30 @@ async function currentRun(protocol, target) {
   return { continuation, verification };
 }
 
+export async function guardWorkflowHook(event) {
+  const { continuation } = await currentRun(
+    await readProtocol(),
+    resolveTarget({}),
+  );
+  if (!continuation)
+    throw new Error(
+      "Missing workflow state. Run workflow-state.mjs init first.",
+    );
+  const { disposition, currentNode, pendingAction } = continuation;
+  if (
+    disposition !== "continue" ||
+    pendingAction?.type !== "invoke_skill" ||
+    !currentNode
+  )
+    throw new Error(
+      `WorkflowRuntime has no active Skill action (${disposition}).`,
+    );
+  console.log("workflow-hook-guard-ok");
+  console.log(`EVENT: ${event}`);
+  console.log(`NODE: ${currentNode}`);
+  console.log(`ACTION: ${pendingAction.id}`);
+}
+
 async function main() {
   const { positionals, options } = parseArguments(process.argv.slice(2));
   const command = positionals.shift() ?? "verify";
@@ -362,8 +386,14 @@ async function main() {
   const artifacts = submissionField(evidence, "artifacts");
   const artifactVersions = submissionField(evidence, "artifactVersions");
   const verification = submissionField(evidence, "verification");
-  const verificationReceipts = submissionField(evidence, "verificationReceipts");
-  const verificationReceiptIds = submissionField(evidence, "verificationReceiptIds");
+  const verificationReceipts = submissionField(
+    evidence,
+    "verificationReceipts",
+  );
+  const verificationReceiptIds = submissionField(
+    evidence,
+    "verificationReceiptIds",
+  );
   const receiptIds = submissionField(evidence, "receiptIds");
   const status = evidence.status === "failed" ? "failed" : "succeeded";
   const submission = {
@@ -413,10 +443,16 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  if (error && typeof error === "object" && error.finding) {
-    console.error(`FINDING: ${JSON.stringify(error.finding)}`);
-  }
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+if (
+  process.argv[1] &&
+  (await fs.realpath(process.argv[1]).catch(() => undefined)) ===
+    fileURLToPath(import.meta.url)
+) {
+  main().catch((error) => {
+    if (error && typeof error === "object" && error.finding) {
+      console.error(`FINDING: ${JSON.stringify(error.finding)}`);
+    }
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}

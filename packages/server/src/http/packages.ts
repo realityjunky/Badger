@@ -1,6 +1,7 @@
 import { publicDraftingJob } from "../drafting/jobs.js";
 import {
   authoringView,
+  readAuthoringStageFinding,
   requestLaneJobs,
   assemblyPreview,
   assembleCurrentPackage,
@@ -105,7 +106,12 @@ export async function handlePackage(input: AuthorizedRequest) {
           "assemble",
         ].includes(action ?? "")
       ) {
-        if (action === "authoring") return authoringView(tx, config, versionId);
+        if (action === "authoring") {
+          const finding = input.url.searchParams.get("finding");
+          return finding === null
+            ? authoringView(tx, config, versionId)
+            : readAuthoringStageFinding(tx, versionId, finding);
+        }
         if (!caps.generate)
           throw new RequestError(
             403,

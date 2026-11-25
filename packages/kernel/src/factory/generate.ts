@@ -708,51 +708,15 @@ console.log(JSON.stringify({
 
 function badgerHookGuardScript(): string {
   return `#!/usr/bin/env node
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { guardWorkflowHook } from "./workflow-guard.mjs";
 
-const event = process.argv[2] ?? "before_tool";
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const runRoot = process.env.BADGER_RUN_ROOT
-  ? path.resolve(process.env.BADGER_RUN_ROOT)
-  : process.cwd();
-const protocolPath = path.join(packageRoot, "reference", "workflow-protocol.json");
-
-function fail(message) {
-  throw new Error(message);
+try {
+  await guardWorkflowHook(process.argv[2] ?? "before_tool");
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
 }
-
-function isWithin(root, target) {
-  const relative = path.relative(path.resolve(root), path.resolve(target));
-  return relative === "" || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(".." + path.sep));
-}
-
-function statePath(protocol) {
-  const value = String(protocol.state?.statePath ?? "");
-  const portable = value.replaceAll("\\\\", "/");
-  if (!value || portable.startsWith("/") || portable.split("/").includes("..")) fail("workflow state path must be project-relative");
-  const target = path.resolve(runRoot, value);
-  if (!isWithin(runRoot, target)) fail("workflow state path must remain inside the run root");
-  return target;
-}
-
-const protocol = JSON.parse(await fs.readFile(protocolPath, "utf8"));
-if (protocol.schemaVersion !== 1 || protocol.kind !== "workflow-kernel" || !Array.isArray(protocol.nodes)) fail("workflow-protocol.json must use the current workflow-kernel schema");
-const file = statePath(protocol);
-const stats = await fs.lstat(file).catch(() => null);
-if (!stats || !stats.isFile() || stats.isSymbolicLink()) fail("workflow state must be a regular file");
-const state = JSON.parse(await fs.readFile(file, "utf8"));
-if (state.workflow !== protocol.name) fail("workflow state does not match this workflow protocol");
-if (state.status !== "running" && state.status !== "waiting") fail("workflow is not active; current status is " + String(state.status));
-const nodes = protocol.nodes.filter((node) => !node.disabled);
-const completed = new Set(Array.isArray(state.completedNodes) ? state.completedNodes : []);
-const current = state.currentNode ?? nodes.find((node) => !completed.has(node.id))?.id ?? null;
-if (!current || !nodes.some((node) => node.id === current)) fail("workflow state has no valid current Node");
-console.log("workflow-hook-guard-ok");
-console.log("EVENT: " + event);
-console.log("NODE: " + current);
-`.replaceAll("\\n", "\n");
+`;
 }
 
 function badgerCheckScript(

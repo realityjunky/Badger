@@ -5,6 +5,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { readPromptTemplate } from "./prompt-templates.js";
 import {
+  AUTHORING_GENERATOR_CONTRACT_VERSION,
   AUTHORING_INPUT_LIMIT_BYTES,
   authoringReadiness,
   authoringSessionGateway,
@@ -16,7 +17,10 @@ import {
   canonicalHash,
   validateAuthoringLaneOutput,
   type AuthoringLaneId,
+  type AuthoringLaneAction,
+  type AuthoringLaneFinding,
   type AuthoringLaneOutput,
+  type AuthoringRepairTarget,
   type CreatorState,
 } from "@realityjunky/badger";
 import type { Queryable } from "./database/database.js";
@@ -30,17 +34,30 @@ import { RequestError } from "./http/errors.js";
 import { createRound, saveQuestion } from "./questionnaire/store.js";
 import {
   auditJob,
+  createDraftingJob,
   publicDraftingJob,
   readDraftingJobs,
   type DraftingActor,
   type DraftingJobRow,
 } from "./drafting/jobs.js";
 import { draftingContext } from "./drafting/context.js";
+import { readDossierHead } from "./dossier.js";
 
 export const isAuthoringJob = (job: { kind: string }) =>
   job.kind === "authoring-lane" || job.kind === "review-vote";
 const sha = (bytes: string | Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
+
+function assertCurrentGenerator(state: CreatorState) {
+  if (
+    state.authoring?.generatorContractVersion !==
+    AUTHORING_GENERATOR_CONTRACT_VERSION
+  )
+    throw new RequestError(
+      409,
+      "The Badger package generator changed; regenerate the scaffold to continue authoring",
+    );
+}
 
 /**
  * Kernel output as readers and Agents see it: an absolute path under the
@@ -108,11 +125,15 @@ export async function authoringView(
 ) {
   const loaded = await loadAuthoring(tx, config, versionId);
   const followUps = await tx.query<{
+    job_id: string;
     lane_id: string;
     question_id: string | null;
     repair_job_id: string | null;
+    target_stage: AuthoringRepairTarget["stage"] | null;
+    target_id: string | null;
+    plan_draft_job_id: string | null;
   }>(
-    "select lane_id, question_id, repair_job_id from authoring_follow_ups where package_id = $1 order by job_id",
+    "select job_id, lane_id, question_id, repair_job_id, target_stage, target_id, plan_draft_job_id from authoring_follow_ups where package_id = $1 order by job_id",
     [loaded.saved.id],
   );
   return {
@@ -123,11 +144,39 @@ export async function authoringView(
       .filter((j) => j.package_id === loaded.saved.id)
       .map(publicDraftingJob),
     followUps: followUps.rows.map((r) => ({
+      jobId: r.job_id,
       laneId: r.lane_id,
       questionId: r.question_id,
       repairJobId: r.repair_job_id,
+      stage: r.target_stage,
+      targetId: r.target_id,
+      planDraftId: r.plan_draft_job_id,
     })),
   };
+}
+
+export async function readAuthoringStageFinding(
+  tx: Queryable,
+  versionId: string,
+  jobId: string,
+) {
+  const { rows } = await tx.query<{
+    jobId: string;
+    laneId: AuthoringLaneId;
+    targetHash: string;
+    action: AuthoringLaneAction;
+    findings: AuthoringLaneFinding[];
+  }>(
+    `select f.job_id as "jobId", f.lane_id as "laneId", f.target_hash as "targetHash",
+       o.output->'action' as action, coalesce(o.output->'findings', '[]'::jsonb) as findings
+     from authoring_follow_ups f
+     join accepted_authoring_outputs o on o.job_id = f.job_id
+     join workflow_packages p on p.id = f.package_id
+     where p.workflow_version_id = $1 and f.job_id = $2 and f.target_stage is not null`,
+    [versionId, jobId],
+  );
+  if (!rows[0]) throw new RequestError(404, "No such Authoring stage finding");
+  return { finding: rows[0] };
 }
 
 export function laneInput(
@@ -272,6 +321,7 @@ export async function requestLaneJobs(
   excludedJobId?: string,
 ) {
   const loaded = await loadAuthoring(tx, config, versionId);
+  assertCurrentGenerator(loaded.state);
   if (
     loaded.saved.invalidated_at !== null ||
     !(await generationInputs(tx, config, versionId, actor.personId)).current
@@ -292,6 +342,8 @@ export async function requestLaneJobs(
     const lane = definition.id;
     if (repairLane && lane !== repairLane) continue;
     if (!repairLane && loaded.readiness.completedLanes.includes(lane)) continue;
+    const action = loaded.readiness.records[lane]?.action;
+    if (action?.target || action?.kind === "bug") continue;
     if (
       jobs.some(
         (j) =>
@@ -392,6 +444,16 @@ export function validateLaneResult(job: DraftingJobRow, result: unknown) {
     job.lane_id!,
     proposal ? JSON.parse(proposal.text).workflow : undefined,
   );
+  const target = output.action?.target;
+  if (
+    target?.stage === "sources" &&
+    !job.context_bundle.pins.some(
+      (pin) => pin.skillId === target.skillId && pin.hash === target.skillHash,
+    )
+  )
+    findings.push(
+      "The Sources repair must name a Skill and hash pinned by this job",
+    );
   if (findings.length)
     throw new RequestError(
       400,
@@ -410,6 +472,7 @@ async function replayAuthoring(
   personId: string,
 ) {
   const loaded = await loadAuthoring(tx, config, versionId);
+  assertCurrentGenerator(loaded.state);
   const inputs = await generationInputs(tx, config, versionId, personId);
   if (!inputs.current || !inputs.loaded || loaded.saved.invalidated_at !== null)
     throw new RequestError(
@@ -447,7 +510,13 @@ async function replayAuthoring(
       expectedRevision: state.authoring!.revision,
       confirmed: true,
     });
-  return { ...loaded, state, namespace, kernel };
+  return {
+    ...loaded,
+    state,
+    namespace,
+    kernel,
+    approvedPlan: inputs.loaded.plan,
+  };
 }
 
 async function commitAuthoring(
@@ -468,6 +537,96 @@ async function commitAuthoring(
     [versionId, text, hash, state.stateNamespace],
   );
   return hash;
+}
+
+async function openStageFollowUp(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  actor: DraftingActor,
+  job: DraftingJobRow,
+  loaded: Awaited<ReturnType<typeof replayAuthoring>>,
+  output: AuthoringLaneOutput,
+  action: AuthoringLaneAction & { target: AuthoringRepairTarget },
+) {
+  const { target } = action;
+  const versionId = job.workflow_version_id;
+  const base = loaded.approvedPlan;
+  let targetId: string | null = null;
+  let targetHash = loaded.saved.proposal_hash;
+  let planDraftId: string | null = null;
+  switch (target.stage) {
+    case "sources":
+      targetId = target.skillId;
+      targetHash = target.skillHash;
+      break;
+    case "dossier": {
+      const dossier = await readDossierHead(tx, versionId);
+      if (!dossier || dossier.hash !== base.snapshot.dossierHash)
+        throw new RequestError(
+          409,
+          "The dossier changed; review the Authoring result again",
+        );
+      targetId = dossier.id;
+      targetHash = dossier.hash;
+      break;
+    }
+    case "plan": {
+      const current = await draftingContext(
+        tx,
+        job.context_bundle.workflow.id,
+        versionId,
+        actor.personId,
+      );
+      if (current.bundle.planning?.basePlanVersionId !== base.id)
+        throw new RequestError(
+          409,
+          "The plan changed; review the Authoring result again",
+        );
+      const draft = await createDraftingJob(
+        tx,
+        deps,
+        actor,
+        versionId,
+        {
+          kind: "draft-plan",
+          roundId: null,
+          parentQuestionId: null,
+          skillId: null,
+          questionId: null,
+          locale: null,
+        },
+        current,
+        {
+          jobId: job.id,
+          packageId: loaded.saved.id,
+          lane: job.lane_id!,
+          resultHash: canonicalHash({ laneOutput: output }),
+          action,
+          findings: output.findings ?? [],
+          basePlan: { id: base.id, hash: base.hash, plan: base.snapshot.plan },
+        },
+      );
+      planDraftId = draft.id;
+      targetId = base.id;
+      targetHash = base.hash;
+      break;
+    }
+  }
+  await tx.query(
+    `insert into authoring_follow_ups
+       (job_id,package_id,lane_id,target_stage,target_id,target_hash,plan_draft_job_id)
+     values ($1,$2,$3,$4,$5,$6,$7)`,
+    [
+      job.id,
+      loaded.saved.id,
+      job.lane_id,
+      target.stage,
+      targetId,
+      targetHash,
+      planDraftId,
+    ],
+  );
+  return { stage: target.stage, targetId, planDraftId };
 }
 
 export async function acceptLaneResult(
@@ -546,7 +705,14 @@ export async function acceptLaneResult(
     "update workflow_versions set revision = revision + 1, updated_at = $2, stages = stages || jsonb_build_object('package','active','evaluation',case when stages->>'evaluation' = 'todo' then 'todo' else 'invalidated' end,'review-publication',case when stages->>'review-publication' = 'todo' then 'todo' else 'invalidated' end) where id = $1",
     [job.workflow_version_id, deps.clock.now()],
   );
-  if (record.status === "NEEDS_CONTEXT") {
+  const action = record.action;
+  let followUp;
+  if (record.status === "BLOCKED" && action?.target) {
+    followUp = await openStageFollowUp(tx, deps, actor, job, loaded, output, {
+      ...action,
+      target: action.target,
+    });
+  } else if (record.status === "NEEDS_CONTEXT") {
     const round = await createRound(
       tx,
       deps,
@@ -582,19 +748,13 @@ export async function acceptLaneResult(
       "insert into authoring_follow_ups (job_id,package_id,lane_id,question_id) values ($1,$2,$3,$4)",
       [job.id, loaded.saved.id, job.lane_id, question.id],
     );
-  } else if (record.status === "BLOCKED") {
-    const workflowId = (
-      await tx.query<{ workflow_id: string }>(
-        "select workflow_id from workflow_versions where id=$1",
-        [job.workflow_version_id],
-      )
-    ).rows[0]!.workflow_id;
+  } else if (record.status === "BLOCKED" && action?.kind !== "bug") {
     const [repair] = await requestLaneJobs(
       tx,
       config,
       deps,
       actor,
-      workflowId,
+      job.context_bundle.workflow.id,
       job.workflow_version_id,
       job.lane_id!,
       job.id,
@@ -609,6 +769,7 @@ export async function acceptLaneResult(
     authoringRevision: record.revision,
     laneId: job.lane_id,
     packageId: loaded.saved.id,
+    ...(followUp && { followUp }),
   };
 }
 

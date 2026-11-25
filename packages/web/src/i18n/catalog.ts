@@ -138,6 +138,18 @@ const en = {
   "authoring.followUps": "Follow-up work",
   "authoring.question": "Open follow-up question",
   "authoring.repair": "Repair job",
+  "authoring.openPlanDraft": "Open plan draft",
+  "authoring.confirmOpenPlan": "Confirm and open plan draft",
+  "authoring.findingOrigin": "Package finding from {lane}",
+  "authoring.openStageFinding": "Open finding in {stage}",
+  "authoring.confirmPlanDraftHelp":
+    "This records the blocker and opens a draft from the approved plan.",
+  "authoring.confirmStageFindingHelp":
+    "This records the blocker and links it to {stage}.",
+  "authoring.openReviewedSkill": "Open the reviewed Skill version",
+  "authoring.backToPackage": "Back to Package",
+  "authoring.badgerBug": "Badger bug",
+  "authoring.confirmBugHelp": "This records a Badger bug blocking the package.",
   "authoring.repairNeedsDispatch": "Repair job needs dispatch",
   "authoring.dispatchRepairHelp":
     "When the repair inputs are ready, use Copy Agent prompt and paste it into your Agent session.",
@@ -1834,6 +1846,17 @@ const zh: Record<MessageId, string> = {
   "authoring.followUps": "后续工作",
   "authoring.question": "打开后续问题",
   "authoring.repair": "修复任务",
+  "authoring.openPlanDraft": "打开计划草稿",
+  "authoring.confirmOpenPlan": "确认并打开计划草稿",
+  "authoring.findingOrigin": "来自 {lane} 通道的软件包问题",
+  "authoring.openStageFinding": "在{stage}中打开问题",
+  "authoring.confirmPlanDraftHelp":
+    "确认后记录阻塞问题，并基于已批准的计划打开草稿。",
+  "authoring.confirmStageFindingHelp": "确认后记录阻塞问题，并链接到{stage}。",
+  "authoring.openReviewedSkill": "打开已审阅的 Skill 版本",
+  "authoring.backToPackage": "返回软件包",
+  "authoring.badgerBug": "Badger 缺陷",
+  "authoring.confirmBugHelp": "确认后记录阻塞软件包的 Badger 缺陷。",
   "authoring.repairNeedsDispatch": "修复任务等待派发",
   "authoring.dispatchRepairHelp":
     "修复所需的输入就绪后，使用「复制 Agent 提示词」，并将提示词粘贴到您的 Agent 会话中。",

@@ -500,6 +500,9 @@ export async function buildAuthoringHandoff(
           path.join(packageRoot, "scripts", "workflow-state.mjs"),
           path.join(packageRoot, "scripts", "workflow-guard.mjs"),
           path.join(packageRoot, "scripts", "workflow-handoff.mjs"),
+          path.join(packageRoot, "scripts", "badger-plan.mjs"),
+          path.join(packageRoot, "scripts", "badger-check.mjs"),
+          path.join(packageRoot, "scripts", "badger-hook-guard.mjs"),
         ]
       : []),
     ...plan.lanes

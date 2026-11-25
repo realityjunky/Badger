@@ -695,6 +695,56 @@ describe("Badger authoring lifecycle", () => {
     expect(hook.stdout).toContain("workflow-hook-guard-ok");
   });
 
+  it("guards the persisted WorkflowRuntime action when the compatibility projection is stale", async () => {
+    const { generated } = await createScaffold();
+    const { packageRoot } = generated;
+    const run = (script: string, ...arguments_: string[]) =>
+      execFileAsync(
+        process.execPath,
+        [path.join(packageRoot, "scripts", script), ...arguments_],
+        {
+          cwd: packageRoot,
+          env: { ...process.env, BADGER_RUN_ROOT: packageRoot },
+        },
+      );
+    const hook = () => run("badger-hook-guard.mjs", "before_tool");
+    await expect(hook()).rejects.toThrow();
+    await run("workflow-state.mjs", "init");
+    const protocolPath = path.join(
+      packageRoot,
+      "reference",
+      "workflow-protocol.json",
+    );
+    const protocolText = await fs.readFile(protocolPath, "utf8");
+    const protocol = JSON.parse(protocolText);
+    const projectionPath = path.join(packageRoot, protocol.state.statePath);
+    const activeProjection = await fs.readFile(projectionPath, "utf8");
+    await fs.writeFile(
+      projectionPath,
+      JSON.stringify({
+        ...JSON.parse(activeProjection),
+        currentNode: "obsolete",
+      }),
+    );
+    const active = await hook();
+    expect(active.stdout).toContain("NODE: prepare");
+    expect(active.stdout).toContain("ACTION:");
+    await fs.writeFile(
+      protocolPath,
+      JSON.stringify({ ...protocol, goal: "Use a different report contract." }),
+    );
+    await expect(hook()).rejects.toThrow(/persisted Run identity/iu);
+    await fs.writeFile(protocolPath, protocolText);
+    await run(
+      "workflow-state.mjs",
+      "record",
+      "prepare",
+      '{"summary":"Report prepared."}',
+    );
+    await fs.writeFile(projectionPath, activeProjection);
+    await expect(hook()).rejects.toThrow(/done|blocked|no active/iu);
+  });
+
   it("rejects Auto-zone drift without changing the package or session", async () => {
     const { state } = await createScaffold();
     await runManualAuthoringFixture({ state });

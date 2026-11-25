@@ -40,6 +40,7 @@ export function draftingJobPrompt(
       job: target,
     };
   const authoring = job.context_bundle.authoring;
+  const followUp = job.context_bundle.authoringFollowUp;
   const lane = authoring?.plan.lanes.find(({ id }) => id === job.lane_id);
   const scaffolds =
     lane?.contentLeaves.flatMap((artifactPath) => {
@@ -73,9 +74,16 @@ export function draftingJobPrompt(
         "Current drafting-session rules supersede older suggestion-editing or completion wording in this template snapshot. Saving suggestions keeps the session open. The person's copied dispatch prompt can authorize finish_job after the final verified save. If the person has authorized only drafting, wait for their instruction to finish. Only people accept or discard suggestions in the dashboard.",
         "Your MCP must expose finish_job for an iterative drafting session. If it is missing, release_job preserves the saved suggestions while ending this claim; update/build the local Badger MCP and restart its connection before reclaiming. After each submit, verify savedDraft.resultHash and job.currentResultHash, and follow job.currentResultPath to the latest content. job.result and job.resultHash always preserve the first submission; a stable original hash does not mean a later save failed. Never submit probe content to a real job to test persistence.",
         "This job is already claimed. Read job.json, context.json, output-schema.json, bounded inputs/ when present and the exact pinned files under skills/. Read result.json when present: it contains the latest saved suggestions, including changes made since any previous session. Never start from an old folder's copy. Write result.json in this new folder, then submit_job with workflowId, versionId, jobId and that folder. Keep this claim for follow-up changes and submit again as needed. When authorized to hand off the final saved draft, call finish_job with the same arguments. release_job and disconnect give up ownership while preserving saved work. Thirty minutes without job activity expires the claim; background checks do not keep it alive. After any handover or expiry, list the current job and claim its latest revision into a new folder before continuing. Return the dashboard link.",
+        ...(followUp
+          ? [
+              `Revise the approved plan in context.json at authoringFollowUp.basePlan.plan. It is bound to the approved dossier in planning.input. Use the findings in authoringFollowUp.findings and preserve the rest of the approved plan.\n\nRequired change\n${followUp.action.requirement}\n\nDrafting instructions\n${followUp.action.prompt}`,
+            ]
+          : []),
         ...(authoring
           ? [
               "If submit_job returns validation findings, correct the named artifacts and retry in this claim before finishing. For a repair job, read the requirement in context.json before repeating the earlier work.",
+              'For a BLOCKED result that needs an approved input revised, use action.kind repair and choose action.target. Use {"stage":"plan"} for a plan edit, {"stage":"sources","skillId":"...","skillHash":"..."} for a change to an exact pinned Skill in context.json, {"stage":"dossier","field":"/..."} for an existing approved Semantic dossier field, or {"stage":"proposal"} for review of the derived proposal. Describe the required change and evidence in findings and give implementable instructions in action.prompt.',
+              "For a BLOCKED result that needs a Badger bug fixed, such as a defect in the generated hook, use action.kind bug with no target stage. Include the generated script path, expected and observed behavior, and reproduction details. Keep secondary findings in findings.",
             ]
           : []),
         ...(scaffolds.length

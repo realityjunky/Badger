@@ -12,6 +12,7 @@ import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
+import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
 
 export function WorkflowProposal({
   basePath,
@@ -206,6 +207,7 @@ export function WorkflowProposal({
       }
     >
       <p className="muted">{t("proposal.description")}</p>
+      <AuthoringStageFinding basePath={basePath} path={path} stage="proposal" />
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view ? (
         <Spin />

@@ -26,6 +26,7 @@ import {
 import { SourcesGate } from "./SourcesGate.js";
 import { useInbox } from "../../inbox/InboxContext.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
+import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
 
 interface SkillOption {
   skill: Skill;
@@ -245,6 +246,11 @@ export function WorkflowSources({
           </Button>
         </Space>
       )}
+      <AuthoringStageFinding
+        basePath={basePath}
+        path={`/workflows/${encodeURIComponent(workflow.id)}/versions/${encodeURIComponent(version.id)}`}
+        stage="sources"
+      />
       <SourcesGate
         key={detail.version.id}
         basePath={basePath}

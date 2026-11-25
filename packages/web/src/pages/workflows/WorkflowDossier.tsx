@@ -19,6 +19,7 @@ import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { DossierComposer } from "./DossierComposer.js";
 import { DossierContent } from "./DossierContent.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
+import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
 import { selectedWorkflowTab } from "./WorkflowTabs.js";
 import {
   DossierReadiness,
@@ -210,6 +211,7 @@ export function WorkflowDossier({
           )}
         </p>
       )}
+      <AuthoringStageFinding basePath={basePath} path={path} stage="dossier" />
       {dossierFailure && (
         <Alert
           type="error"

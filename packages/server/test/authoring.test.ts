@@ -162,6 +162,207 @@ it("reports Markdown findings for both pause-points leaves before handoff and re
   expect(claim.instructions).toContain("## Drift Handling");
 });
 
+it("opens one plan draft from a confirmed lane blocker without changing the current plan", async () => {
+  const fixture = await generated();
+  const { call, base } = fixture;
+  const planBefore = await call(`${base}/plan`);
+  const { jobs } = await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    { confirmed: true },
+    engineer,
+    201,
+  );
+  const script = jobs.find((job: any) => job.laneId === "script");
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "plan follow-up", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const { job } = await acceptLane(fixture, secret, script, (context) => ({
+    lane: "script",
+    status: "BLOCKED",
+    semanticDossierHash: context.authoring.plan.semanticDossierHash,
+    summary: "The workflow does not bind the report to the reviewer decision.",
+    action: {
+      kind: "repair",
+      target: { stage: "plan" },
+      requirement: "Bind the review to the exact report artifact.",
+      prompt: "Require the report digest when approving the report Node.",
+    },
+  }));
+  const draftId = job.decision?.followUp?.planDraftId;
+  expect(draftId).toBeTypeOf("string");
+  const repeated = await call(
+    `${base}/drafting-jobs/${script.id}/accept`,
+    "POST",
+    {
+      revision: job.decision.revision,
+      laneOutput: job.decision.decision.laneOutput,
+      confirmed: true,
+      confirmationHash: job.decision.confirmationHash,
+      requestId: `accept-${script.id}`,
+    },
+  );
+  expect(repeated.job.decision.followUp.planDraftId).toBe(draftId);
+  const reference = jobs.find((entry: any) => entry.laneId === "reference");
+  await acceptLane(fixture, secret, reference, (context) => ({
+    lane: "reference",
+    status: "BLOCKED",
+    semanticDossierHash: context.authoring.plan.semanticDossierHash,
+    summary: "The generated hook used the stale compatibility projection.",
+    action: {
+      kind: "bug",
+      requirement: "Read the current WorkflowRuntime action.",
+      prompt:
+        "Compare hook output while the compatibility projection is stale.",
+    },
+  }));
+  const view = await call(`${base}/package/authoring`);
+  expect(view.followUps).toContainEqual(
+    expect.objectContaining({
+      laneId: "script",
+      stage: "plan",
+      jobId: script.id,
+      planDraftId: draftId,
+    }),
+  );
+  await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    { confirmed: true },
+    engineer,
+    201,
+  );
+  const { jobs: all } = await call(`${base}/drafting-jobs`);
+  expect(all.filter((entry: any) => entry.laneId === "script")).toHaveLength(1);
+  expect(all.filter((entry: any) => entry.laneId === "reference")).toHaveLength(
+    1,
+  );
+  expect(
+    all.filter(
+      (entry: any) => entry.kind === "draft-plan" && entry.status === "queued",
+    ),
+  ).toHaveLength(1);
+  const draft = all.find((entry: any) => entry.id === draftId);
+  const route = `${base}/drafting-jobs/${draft.id}`;
+  const claim = await call(
+    route + "/claim",
+    "POST",
+    { revision: draft.revision },
+    engineer,
+    200,
+    secret,
+  );
+  expect(claim.contextBundle.authoringFollowUp).toMatchObject({
+    jobId: script.id,
+    resultHash: job.currentResultHash,
+    action: {
+      target: { stage: "plan" },
+      prompt: "Require the report digest when approving the report Node.",
+    },
+  });
+  expect(claim.contextBundle.authoringFollowUp.basePlan.id).toBe(
+    claim.contextBundle.planning.basePlanVersionId,
+  );
+  expect(claim.instructions).toContain(
+    "Require the report digest when approving the report Node.",
+  );
+  expect(await call(`${base}/plan`)).toMatchObject({
+    versions: planBefore.versions,
+    headVersionId: planBefore.headVersionId,
+    confirmation: planBefore.confirmation,
+  });
+});
+
+it("links accepted Sources, Dossier, and Proposal findings to their exact inputs", async () => {
+  const fixture = await generated();
+  const { call, base, dossier, skill } = fixture;
+  const { jobs } = await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    { confirmed: true },
+    engineer,
+    201,
+  );
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "stage follow-ups", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const before = await call(`${base}/proposal`);
+  const allTargets = (context: any) => {
+    const pin = context.pins.find((entry: any) => entry.skillId === skill.id);
+    return {
+      script: { stage: "sources", skillId: pin.skillId, skillHash: pin.hash },
+      reference: { stage: "dossier", field: "/nodes/0/responsibility" },
+      "pause-points": { stage: "proposal" },
+    };
+  };
+  const changes = [];
+  for (const job of jobs) {
+    const { job: accepted } = await acceptLane(
+      fixture,
+      secret,
+      job,
+      (context) => ({
+        lane: job.laneId,
+        status: "BLOCKED",
+        semanticDossierHash: context.authoring.plan.semanticDossierHash,
+        summary: "The package exposed an issue with an approved input.",
+        findings: [
+          {
+            severity: "important",
+            problem: "The current report contract is incomplete.",
+          },
+        ],
+        action: {
+          kind: "repair",
+          requirement: "Review the incomplete report contract.",
+          prompt: "Inspect the missing report evidence in the reviewed input.",
+          target:
+            allTargets(context)[
+              job.laneId as keyof ReturnType<typeof allTargets>
+            ],
+        },
+      }),
+    );
+    const { finding } = await call(
+      `${base}/package/authoring?finding=${job.id}`,
+    );
+    const target = finding.action.target;
+    changes.push(target.stage);
+    expect(finding).toMatchObject({
+      jobId: job.id,
+      findings: [{ problem: "The current report contract is incomplete." }],
+      targetHash:
+        target.stage === "sources"
+          ? target.skillHash
+          : target.stage === "dossier"
+            ? dossier.hash
+            : before.proposal.proposalHash,
+    });
+    expect(accepted.decision.followUp).toMatchObject({
+      stage: target.stage,
+      planDraftId: null,
+    });
+  }
+  expect(changes).toEqual(["sources", "dossier", "proposal"]);
+  const { jobs: after } = await call(`${base}/drafting-jobs`);
+  expect(
+    after.filter((job: any) => job.kind === "authoring-lane"),
+  ).toHaveLength(3);
+  expect(await call(`${base}/proposal`)).toMatchObject({
+    proposal: before.proposal,
+    confirmation: before.confirmation,
+    planVersionHash: before.planVersionHash,
+  });
+});
+
 it("offers only current Wave lanes as bounded Agent jobs and keeps submitted output out of the authoring session until acceptance", async () => {
   const { call, base } = await generated();
   const { jobs } = await call(
