@@ -11,6 +11,7 @@ import {
   claimDraftingJob,
   createDraftingJob,
   decideDraftingJob,
+  deletePlanDraft,
   draftingTarget,
   finishDraftingJob,
   isQuestionnaireDraftingJob,
@@ -56,11 +57,9 @@ const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
 export function draftingJobMethods(path: string): string | null {
   const match = PATH.exec(path);
   if (!match) return null;
-  return match[4] && match[4] !== "prompt"
-    ? "POST"
-    : match[3]
-      ? "GET, HEAD"
-      : "GET, HEAD, POST";
+  if (!match[3]) return "GET, HEAD, POST";
+  if (!match[4]) return "GET, HEAD, DELETE";
+  return match[4] === "prompt" ? "GET, HEAD" : "POST";
 }
 
 export async function handleDraftingJobs(input: AuthorizedRequest) {
@@ -95,7 +94,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         : null,
   };
   let body: Record<string, unknown> = {};
-  if (method === "POST") {
+  if (method === "POST" || method === "DELETE") {
     const parsed = await readJsonBody(request, 1024 * 1024 + 16384);
     if (!parsed.ok)
       throw new RequestError(parsed.status ?? 400, parsed.message);
@@ -132,8 +131,14 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       person,
       workflowId,
     );
+    const workflowAccess = await workflowCapabilities(
+      tx,
+      access,
+      person,
+      workflow,
+    );
     if (
-      !(await workflowCapabilities(tx, access, person, workflow)).read ||
+      !workflowAccess.read ||
       !(capabilities.compose || capabilities.reviewSuggestions)
     )
       throw new RequestError(
@@ -252,15 +257,33 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       return { status: 201, value: { job: publicDraftingJob(job) } };
     }
     const job = jobs.find((j) => j.id === id);
+    const requestId =
+      decisionCommit && context.credential.kind !== "token"
+        ? textInput(body.requestId, "requestId", 200)
+        : null;
+    const inputHash = requestId
+      ? canonicalHash({ workflowId, versionId, jobId: id, action, body })
+      : null;
+    const previous = requestId
+      ? (
+          await tx.query<{
+            job_id: string;
+            input_hash: string;
+            response: object;
+          }>(
+            "select job_id, input_hash, response from drafting_job_decisions where person_id = $1 and request_id = $2",
+            [person.id, requestId],
+          )
+        ).rows[0]
+      : undefined;
+    // A deleted draft can still have a replayable decision receipt.
+    if (previous && previous.job_id === id && previous.input_hash === inputHash)
+      return { status: 200, value: previous.response };
     if (!job || (!capabilities.compose && !isQuestionnaireDraftingJob(job)))
       throw new RequestError(
         404,
         "No such drafting job in this workflow version",
       );
-    if (!action) {
-      await auditJob(tx, deps, actor, job, "viewed", null);
-      return { status: 200, value: { job: publicDraftingJob(job) } };
-    }
     // Return conflicts after committing reconciliation, so cancellation and
     // expiry survive the very request that discovers stale inputs or leases.
     const conflict = (message: string) => ({
@@ -270,6 +293,32 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         job: publicDraftingJob(job),
       },
     });
+    if (method === "DELETE") {
+      if (!workflowAccess.editPlan)
+        throw new RequestError(
+          403,
+          "Only a signed-in Engineer deletes plan drafts",
+        );
+      if (job.kind !== "draft-plan")
+        throw new RequestError(400, "Only plan drafts can be deleted here");
+      fields(body, ["revision", "confirmed"]);
+      if (body.confirmed !== true)
+        throw new RequestError(400, "Confirm deletion of the plan draft");
+      if (revisionInput(body.revision) !== job.revision)
+        return conflict("The plan draft changed. Reload before deleting it.");
+      if (job.status === "claimed")
+        return conflict(
+          "Finish or release the active drafting session before deleting",
+        );
+      if (job.status === "accepted")
+        return conflict("This draft was already accepted as a plan version");
+      await deletePlanDraft(tx, deps, actor, job);
+      return { status: 200, value: { deleted: true } };
+    }
+    if (!action) {
+      await auditJob(tx, deps, actor, job, "viewed", null);
+      return { status: 200, value: { job: publicDraftingJob(job) } };
+    }
     if (job.status === "cancelled")
       return conflict("The job's inputs changed; request a new job");
     if (action === "prompt") {
@@ -525,35 +574,10 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       "confirmed",
       "requestId",
     ]);
-    const requestId = decisionCommit
-      ? textInput(body.requestId, "requestId", 200)
-      : null;
-    const inputHash = canonicalHash({
-      workflowId,
-      versionId,
-      jobId: job.id,
-      action,
-      body,
-    });
-    if (requestId) {
-      const previous = (
-        await tx.query<{
-          job_id: string;
-          input_hash: string;
-          response: object;
-        }>(
-          "select job_id, input_hash, response from drafting_job_decisions where person_id = $1 and request_id = $2",
-          [person.id, requestId],
-        )
-      ).rows[0];
-      if (previous) {
-        if (previous.job_id !== job.id || previous.input_hash !== inputHash)
-          return conflict(
-            "This request ID already confirmed a different drafting decision",
-          );
-        return { status: 200, value: previous.response };
-      }
-    }
+    if (previous)
+      return conflict(
+        "This request ID already confirmed a different drafting decision",
+      );
     if (job.status !== "submitted")
       return conflict("Only submitted suggestions can be reviewed");
     if (revisionInput(body.revision) !== job.revision)
@@ -599,7 +623,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       job,
       preview,
       requestId!,
-      inputHash,
+      inputHash!,
       input.blobs,
       input.config,
     );

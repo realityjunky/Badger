@@ -431,7 +431,7 @@ export function WorkflowAuthoring({
                       </Link>
                     ) : item.stage ? (
                       <Link to={followUpLocation(item.jobId, item)}>
-                        {item.stage === "plan"
+                        {item.planDraftId
                           ? t("authoring.openPlanDraft")
                           : format("authoring.openStageFinding", {
                               stage: t(stageLabels[item.stage]),

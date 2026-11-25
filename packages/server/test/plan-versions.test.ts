@@ -400,6 +400,79 @@ it("selects an earlier plan version again when its content is saved again, super
   expect(claimed.contextBundle.planning.basePlanVersionId).toBe(original.id);
 });
 
+it("deletes a confirmed plan draft at its current revision", async () => {
+  service = await startPlanningService();
+  const { call, base, approve } = await planningFixture(service);
+  await approve("dossier", owner);
+  const jobs = `${base}/drafting-jobs`;
+  const requestDraft = () =>
+    call(jobs, "POST", { kind: "draft-plan", confirmed: true }, engineer, 201);
+  const { job } = await requestDraft();
+  const { job: other } = await requestDraft();
+  const route = `${jobs}/${job.id}`;
+  const deletion = { revision: job.revision, confirmed: true };
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "Planner", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  await call(route, "DELETE", deletion, observer, 403);
+  await call(route, "DELETE", deletion, engineer, 403, secret);
+  await call(route, "DELETE", { revision: job.revision }, engineer, 400);
+  await call(
+    route,
+    "DELETE",
+    { ...deletion, revision: job.revision + 1 },
+    engineer,
+    409,
+  );
+  expect(await call(route, "DELETE", deletion)).toEqual({ deleted: true });
+  await call(route, "GET", undefined, engineer, 404);
+  expect(
+    (await call(jobs)).jobs.map((draft: { id: string }) => draft.id),
+  ).toEqual([other.id]);
+  const otherRoute = `${jobs}/${other.id}`;
+  const { job: claimed, contextBundle } = await call(
+    otherRoute + "/claim",
+    "POST",
+    {
+      revision: other.revision,
+    },
+  );
+  const { job: submitted } = await call(otherRoute + "/submit", "POST", {
+    leaseId: claimed.lease.id,
+    contextHash: other.contextHash,
+    result: { plan: contextBundle.planning.skeleton },
+  });
+  const rejection = {
+    revision: submitted.revision,
+    reason: "The draft is no longer needed.",
+  };
+  const { preview } = await call(
+    otherRoute + "/reject-preview",
+    "POST",
+    rejection,
+  );
+  const confirmed = {
+    ...rejection,
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: "discard-plan-draft",
+  };
+  const rejected = await call(otherRoute + "/reject", "POST", confirmed);
+  await call(otherRoute, "DELETE", {
+    revision: rejected.job.revision,
+    confirmed: true,
+  });
+  expect((await call(jobs)).jobs).toEqual([]);
+  expect(await call(otherRoute + "/reject", "POST", confirmed)).toEqual(
+    rejected,
+  );
+  expect((await call(`${base}/plan`)).versions).toEqual([]);
+});
+
 it("keeps an Agent's plan as a suggestion until an Engineer reviews and accepts edited content", async () => {
   service = await startPlanningService();
   const { call, base, dossier, approve } = await planningFixture(service);
@@ -437,6 +510,13 @@ it("keeps an Agent's plan as a suggestion until an Engineer reviews and accepts 
   const plan = claimed.contextBundle.planning.skeleton;
   plan.workflow.customNodes[0].implementation.skill = "prepare";
   const lease = { leaseId: claimed.job.lease.id, contextHash: job.contextHash };
+  await call(
+    `${jobs}/${job.id}`,
+    "DELETE",
+    { revision: claimed.job.revision, confirmed: true },
+    engineer,
+    409,
+  );
   await call(
     `${jobs}/${job.id}/submit`,
     "POST",
@@ -477,6 +557,13 @@ it("keeps an Agent's plan as a suggestion until an Engineer reviews and accepts 
   };
   const accepted = await call(`${jobs}/${job.id}/accept`, "POST", body);
   expect(accepted.job.status).toBe("accepted");
+  await call(
+    `${jobs}/${job.id}`,
+    "DELETE",
+    { revision: accepted.job.revision, confirmed: true },
+    engineer,
+    409,
+  );
   const view = await call(`${base}/plan`);
   expect(view.versions).toHaveLength(1);
   expect(view.versions[0].snapshot.plan.workflow.customNodes[0].label).toBe(

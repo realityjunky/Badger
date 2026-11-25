@@ -100,8 +100,9 @@ describe("reviewed SQL migrations", () => {
         "select * from drafting_jobs",
       )
     ).rows[0]!;
-    const { lease_kind, lease_activity_at, ...original } = after;
+    const { lease_kind, lease_activity_at, deleted_at, ...original } = after;
     expect(original).toEqual(before);
+    expect(deleted_at).toBeNull();
     expect(lease_kind).toBe("agent");
     expect(new Date(lease_activity_at as string).getTime()).toBe(
       clock.now().getTime(),
@@ -232,9 +233,11 @@ describe("reviewed SQL migrations", () => {
       review_revision,
       lease_kind,
       lease_activity_at,
+      deleted_at,
       ...original
     } = after;
     expect(original).toEqual(before);
+    expect(deleted_at).toBeNull();
     expect([lease_kind, lease_activity_at]).toEqual([null, null]);
     expect([
       review_result,
@@ -1410,6 +1413,7 @@ describe("reviewed SQL migrations", () => {
       "0050",
       "0051",
       "0052",
+      "0053",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1469,6 +1473,7 @@ describe("reviewed SQL migrations", () => {
         "0050",
         "0051",
         "0052",
+        "0053",
       ],
       pending: [],
       drifted: [],
@@ -1638,6 +1643,7 @@ describe("reviewed SQL migrations", () => {
         "0050",
         "0051",
         "0052",
+        "0053",
       ],
       pending: [],
       drifted: [],

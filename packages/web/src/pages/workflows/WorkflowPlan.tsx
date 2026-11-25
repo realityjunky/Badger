@@ -71,6 +71,7 @@ export function WorkflowPlan({
     hash?: string;
     requestId: string;
   } | null>(null);
+  const [deleting, setDeleting] = useState<PlanDraftingJob | null>(null);
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
   const params = new URLSearchParams(location.search);
   const selectedId = params.get("planVersion");
@@ -176,6 +177,23 @@ export function WorkflowPlan({
       kind: "draft-plan",
       confirmed: true,
     });
+    await changed();
+  }
+  async function deleteDraft() {
+    if (!deleting) return;
+    const { id, revision } = deleting;
+    await questionnaireRequest(
+      basePath,
+      `${path}/drafting-jobs/${encodeURIComponent(id)}`,
+      "DELETE",
+      { revision, confirmed: true },
+    );
+    setJobs((current) => current.filter((job) => job.id !== id));
+    setDeleting(null);
+    if (draftId === id) {
+      params.delete("planDraft");
+      navigate({ search: params.toString(), hash: "#plan" }, { replace: true });
+    }
     await changed();
   }
   async function previewApproval() {
@@ -294,7 +312,7 @@ export function WorkflowPlan({
       {!selectedDraft && (
         <AuthoringStageFinding basePath={basePath} path={path} stage="plan" />
       )}
-      {failure && <Alert type="error" showIcon title={failure} />}
+      {failure && !deleting && <Alert type="error" showIcon title={failure} />}
       {!view && !failure && <Spin aria-label={t("common.loading")} />}
       {view && (
         <>
@@ -390,7 +408,9 @@ export function WorkflowPlan({
                       )
                     )}
                     <Space wrap>
-                      <span>{t("plan.draft")}</span>
+                      <span className="plan-draft-id">
+                        {t("plan.draft")} <code>{job.id}</code>
+                      </span>
                       <Tag>{t(`drafting.state.${job.status}`)}</Tag>
                       {["queued", "submitted"].includes(job.status) &&
                         detail.capabilities.editPlan && (
@@ -428,6 +448,19 @@ export function WorkflowPlan({
                           </Button>
                         </>
                       )}
+                      {job.status !== "claimed" &&
+                        job.status !== "accepted" && (
+                          <Button
+                            danger
+                            disabled={busy}
+                            onClick={() => {
+                              setFailure(null);
+                              setDeleting(job);
+                            }}
+                          >
+                            {t("plan.deleteDraft")}
+                          </Button>
+                        )}
                     </Space>
                     {job.status === "claimed" &&
                       (job.review?.result ?? job.result) && (
@@ -498,6 +531,25 @@ export function WorkflowPlan({
           }}
         />
         {failure && <Alert type="error" title={failure} />}
+      </Modal>
+      <Modal
+        open={deleting !== null}
+        title={t("plan.confirmDeleteDraft")}
+        okText={t("plan.deleteDraft")}
+        okButtonProps={{ danger: true }}
+        cancelText={t("common.cancel")}
+        confirmLoading={busy}
+        onCancel={() => {
+          if (busy) return;
+          setDeleting(null);
+          setFailure(null);
+        }}
+        onOk={() => void run(deleteDraft)}
+      >
+        <p className="plan-draft-id">
+          <code>{deleting?.id}</code>
+        </p>
+        {failure && <Alert type="error" showIcon title={failure} />}
       </Modal>
     </WorkflowPanel>
   );

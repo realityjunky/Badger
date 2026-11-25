@@ -270,6 +270,27 @@ it("opens one plan draft from a confirmed lane blocker without changing the curr
   expect(claim.instructions).toContain(
     "Require the report digest when approving the report Node.",
   );
+  const { job: released } = await call(
+    route + "/release",
+    "POST",
+    { leaseId: claim.job.lease.id, contextHash: claim.job.contextHash },
+    engineer,
+    200,
+    secret,
+  );
+  await call(route, "DELETE", { revision: released.revision, confirmed: true });
+  expect((await call(`${base}/package/authoring`)).followUps).toContainEqual(
+    expect.objectContaining({
+      jobId: script.id,
+      stage: "plan",
+      planDraftId: null,
+    }),
+  );
+  expect(
+    await call(`${base}/package/authoring?finding=${script.id}`),
+  ).toMatchObject({
+    finding: { jobId: script.id, action: { target: { stage: "plan" } } },
+  });
   expect(await call(`${base}/plan`)).toMatchObject({
     versions: planBefore.versions,
     headVersionId: planBefore.headVersionId,

@@ -269,6 +269,8 @@ const en = {
   "plan.requestHelp":
     "Queue a drafting job for your Agent using the approved dossier, skeleton, and pinned Skill versions. Its result stays a suggestion until you accept it.",
   "plan.draft": "Plan draft",
+  "plan.deleteDraft": "Delete draft",
+  "plan.confirmDeleteDraft": "Delete plan draft?",
   "plan.draftSaved":
     "Draft saved. Ask the Agent to finish the drafting session to make it available for review.",
   "plan.suggestions": "Plan drafting jobs and suggestions",
@@ -1966,6 +1968,8 @@ const zh: Record<MessageId, string> = {
   "plan.requestHelp":
     "基于已批准的语义档案、计划骨架及固定的 Skill 版本创建 Agent 起草任务。您接受后，建议才会成为计划版本。",
   "plan.draft": "计划草稿",
+  "plan.deleteDraft": "删除草稿",
+  "plan.confirmDeleteDraft": "删除计划草稿？",
   "plan.draftSaved": "草稿已保存。请让 Agent 结束起草会话，以便审核。",
   "plan.suggestions": "计划起草任务与建议",
   "plan.reviewSuggestion": "审阅计划建议",

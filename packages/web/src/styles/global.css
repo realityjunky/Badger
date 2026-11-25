@@ -2225,6 +2225,9 @@ button.rail-link {
   padding: 8px;
   border-left: 2px solid var(--badger-color-border);
 }
+.plan-draft-id {
+  overflow-wrap: anywhere;
+}
 .questionnaire-questions a,
 .questionnaire-concerns a {
   display: block;

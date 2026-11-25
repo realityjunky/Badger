@@ -133,7 +133,13 @@ export async function authoringView(
     target_id: string | null;
     plan_draft_job_id: string | null;
   }>(
-    "select job_id, lane_id, question_id, repair_job_id, target_stage, target_id, plan_draft_job_id from authoring_follow_ups where package_id = $1 order by job_id",
+    `select follow_up.job_id, follow_up.lane_id, follow_up.question_id,
+       follow_up.repair_job_id, follow_up.target_stage, follow_up.target_id,
+       plan_draft.id as plan_draft_job_id
+     from authoring_follow_ups follow_up
+     left join drafting_jobs plan_draft
+       on plan_draft.id = follow_up.plan_draft_job_id and plan_draft.deleted_at is null
+     where follow_up.package_id = $1 order by follow_up.job_id`,
     [loaded.saved.id],
   );
   return {

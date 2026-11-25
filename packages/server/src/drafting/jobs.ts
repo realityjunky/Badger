@@ -209,7 +209,7 @@ export async function auditJob(
 export async function readDraftingJobs(tx: Queryable, versionId: string) {
   return (
     await tx.query<DraftingJobRow>(
-      "select * from drafting_jobs where workflow_version_id = $1 order by created_at, id",
+      "select * from drafting_jobs where workflow_version_id = $1 and deleted_at is null order by created_at, id",
       [versionId],
     )
   ).rows;
@@ -224,6 +224,24 @@ async function finishInbox(
     "update inbox_items set state = 'done', revision = revision + 1, updated_at = $2 where drafting_job_id = $1 and state <> 'done'",
     [id, deps.clock.now()],
   );
+}
+
+export async function deletePlanDraft(
+  tx: Queryable,
+  deps: ServiceDependencies,
+  actor: DraftingActor,
+  job: DraftingJobRow,
+) {
+  const deleted = (
+    await tx.query<DraftingJobRow>(
+      `update drafting_jobs
+       set status = 'cancelled', revision = revision + 1, deleted_at = $2, updated_at = $2
+       where id = $1 returning *`,
+      [job.id, deps.clock.now()],
+    )
+  ).rows[0]!;
+  await finishInbox(tx, deps, job.id);
+  await auditJob(tx, deps, actor, deleted, "deleted", job.revision);
 }
 
 async function openDraftingInbox(
