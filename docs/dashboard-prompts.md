@@ -68,10 +68,10 @@ not mutate that snapshot, the original Agent submission or its context hash.
    IDs, citations, language and scope, then calls `submit_job` for that claim.
 6. Submission keeps the job **Claimed**. Continue follow-up changes through
    the same Agent session, editing `result.json` and calling `submit_job` again.
-7. When the person says the drafting session is finished, the Agent calls
-   `finish_job`. The latest saved suggestions become available for dashboard
-   editing or another Agent claim. Only a person's separate acceptance enters
-   them into records; finishing completes no human gate.
+7. The copied prompt authorizes the Agent to call `finish_job` after it saves
+   and verifies the final draft, including a valid draft that reports blockers.
+   The latest saved suggestions become available for dashboard editing or
+   another Agent claim. A person separately accepts them into records.
 
 `finish_job` hands over saved suggestions; submit local changes first.
 `release_job` gives up ownership, preserving saved suggestions or returning an
@@ -94,9 +94,10 @@ at `job.currentResultPath` (`review.result` for revisions). The original
 saved claim keeps the suggestions available; never submit probes to a real
 job to test whether a save worked.
 
-A claim carries the same method when an Agent starts directly through MCP
-without a copied prompt. Claiming creates the private local evidence folder;
-it does not authorize host-wide Skill discovery or writes to service-host paths.
+When an Agent starts directly through MCP, it follows the person's instructions
+on when to call `finish_job`. Claiming creates a private local folder for the
+supplied evidence. Read only the supplied Skills and keep drafts in the claim
+folder.
 
 On a changed revision, cancelled job, expired lease or denied access, read the
 current record and report the conflict. Preserve any useful local draft for

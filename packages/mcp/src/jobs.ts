@@ -384,7 +384,7 @@ export async function finishJob(
               : `${api.url}/questionnaire?workflow=${encodeURIComponent(input.workflowId)}&version=${encodeURIComponent(input.versionId)}&panel=suggestions`,
         message:
           action === "submit"
-            ? `The latest draft was saved with hash ${savedDraft!.resultHash} at ${savedDraft!.resultPath}. job.result and job.resultHash preserve the first submission; use job.currentResultHash and job.currentResultPath for the current draft. ${savedDraft!.claimRetained ? "This MCP session keeps the job claimed for follow-up changes. Edit result.json and call submit_job again as needed. Call finish_job only when the person says the drafting session is finished." : "The claim was released. Update and restart the local Badger MCP before continuing an iterative drafting session."}`
+            ? `The latest draft was saved with hash ${savedDraft!.resultHash} at ${savedDraft!.resultPath}. job.result and job.resultHash preserve the first submission; use job.currentResultHash and job.currentResultPath for the current draft. ${savedDraft!.claimRetained ? "This MCP session keeps the job claimed for follow-up changes. Edit result.json and call submit_job again as needed. Follow the person's instructions for calling finish_job, including authorization in the copied dispatch prompt." : "The claim was released. Update and restart the local Badger MCP before continuing an iterative drafting session."}`
             : "The drafting session is finished. A person can review and edit the suggestions in the dashboard, or claim the job again with an Agent. Only a person can accept or discard them.",
       }
     : response;

@@ -498,7 +498,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
               "job.result and job.resultHash preserve the first submission. Use job.currentResultHash and job.currentResultPath to verify later drafts.",
               legacySubmission
                 ? "This request omitted keepClaim: true and released the claim. Update and restart the local Badger MCP to retain claims across submissions and use finish_job. Releasing a saved draft keeps its suggestions available for review."
-                : "The claim remains active for follow-up changes. Call finish_job only when the person says the drafting session is finished.",
+                : "The claim remains active for follow-up changes. Follow the person's instructions for calling finish_job, including authorization in the copied dispatch prompt.",
             ].join(" "),
             job: publicJob,
           },

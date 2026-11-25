@@ -133,7 +133,7 @@ export function WorkflowPackage({
       requestId: review.requestId,
     });
     setReview(null);
-    setActiveTab("jobs");
+    setActiveTab(undefined);
     setRefresh((r) => r + 1);
     onChanged();
   }
@@ -144,68 +144,6 @@ export function WorkflowPackage({
   const tabs: NonNullable<TabsProps["items"]> = [];
   if (saved) {
     tabs.push(
-      {
-        key: "files",
-        label: t("package.files"),
-        children: (
-          <>
-            <label className="field">
-              {t("package.filterFiles")}
-              <Input
-                value={fileFilter}
-                allowClear
-                onChange={(event) => setFileFilter(event.target.value)}
-              />
-            </label>
-            <Table
-              size="small"
-              rowKey="path"
-              dataSource={saved.files.filter((entry) =>
-                entry.path.toLowerCase().includes(fileFilter.toLowerCase()),
-              )}
-              pagination={{ pageSize: 10, showSizeChanger: false }}
-              scroll={{ x: 720 }}
-              columns={[
-                {
-                  title: t("package.file"),
-                  dataIndex: "path",
-                  render: (value: string) => (
-                    <Button
-                      type="link"
-                      onClick={() =>
-                        void run(async () =>
-                          setFile(
-                            await questionnaireRequest(
-                              basePath,
-                              `${path}/package/file?path=${encodeURIComponent(value)}`,
-                            ),
-                          ),
-                        )
-                      }
-                    >
-                      {value}
-                    </Button>
-                  ),
-                },
-                {
-                  title: t("package.owner"),
-                  dataIndex: "owner",
-                  render: (value: "auto" | "authored" | "source") => (
-                    <Tag>{t(`package.owner.${value}`)}</Tag>
-                  ),
-                },
-                {
-                  title: "SHA-256",
-                  dataIndex: "sha256",
-                  render: (value: string) => (
-                    <code className="package-file-hash">{value}</code>
-                  ),
-                },
-              ]}
-            />
-          </>
-        ),
-      },
       {
         key: "lanes",
         label: t("authoring.title"),
@@ -278,6 +216,70 @@ export function WorkflowPackage({
             </li>
           ))}
         </ul>
+      ),
+    });
+  }
+  if (saved) {
+    tabs.push({
+      key: "files",
+      label: t("package.files"),
+      children: (
+        <>
+          <label className="field">
+            {t("package.filterFiles")}
+            <Input
+              value={fileFilter}
+              allowClear
+              onChange={(event) => setFileFilter(event.target.value)}
+            />
+          </label>
+          <Table
+            size="small"
+            rowKey="path"
+            dataSource={saved.files.filter((entry) =>
+              entry.path.toLowerCase().includes(fileFilter.toLowerCase()),
+            )}
+            pagination={{ pageSize: 10, showSizeChanger: false }}
+            scroll={{ x: 720 }}
+            columns={[
+              {
+                title: t("package.file"),
+                dataIndex: "path",
+                render: (value: string) => (
+                  <Button
+                    type="link"
+                    onClick={() =>
+                      void run(async () =>
+                        setFile(
+                          await questionnaireRequest(
+                            basePath,
+                            `${path}/package/file?path=${encodeURIComponent(value)}`,
+                          ),
+                        ),
+                      )
+                    }
+                  >
+                    {value}
+                  </Button>
+                ),
+              },
+              {
+                title: t("package.owner"),
+                dataIndex: "owner",
+                render: (value: "auto" | "authored" | "source") => (
+                  <Tag>{t(`package.owner.${value}`)}</Tag>
+                ),
+              },
+              {
+                title: "SHA-256",
+                dataIndex: "sha256",
+                render: (value: string) => (
+                  <code className="package-file-hash">{value}</code>
+                ),
+              },
+            ]}
+          />
+        </>
       ),
     });
   }

@@ -1,27 +1,16 @@
 import { Alert, Button, Collapse, Input, Modal, Space, Table, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type {
-  AuthoringReadiness,
-  AuthoringLaneOutput,
-} from "@realityjunky/badger";
+import type { AuthoringReadiness } from "@realityjunky/badger";
+import type { AuthoringDraftingJob } from "../../api/drafting-jobs.js";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import { AgentPromptButton } from "../../components/AgentPromptButton.js";
 import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
-type LaneJob = {
-  id: string;
-  laneId: string;
-  kind: string;
-  status: string;
-  revision: number;
-  result: { laneOutput: AuthoringLaneOutput } | null;
-  review?: { result: { laneOutput: AuthoringLaneOutput } } | null;
-  decision: {
-    decision?: { reason?: string };
-    authoringRevision?: number;
-  } | null;
+type LaneJob = AuthoringDraftingJob & {
+  createdAt: string;
+  decision: { decision?: { reason?: string } } | null;
 };
 type View = {
   current: boolean;
@@ -46,7 +35,7 @@ export function WorkflowAuthoring({
   canManage: boolean;
   onChanged(): void;
 }) {
-  const { t } = useI18n();
+  const { t, format, locale } = useI18n();
   const [view, setView] = useState<View | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,6 +118,27 @@ export function WorkflowAuthoring({
     setReload((r) => r + 1);
     onChanged();
   };
+  const laneRows = view
+    ? Object.values(view.readiness.lanes).map((lane) => {
+        const jobs = view.jobs
+          .filter((job) => job.laneId === lane.id)
+          .reverse();
+        const job =
+          jobs.find(({ status }) =>
+            ["queued", "claimed", "submitted"].includes(status),
+          ) ?? jobs[0];
+        return {
+          ...lane,
+          job,
+          earlierJobs: jobs.filter((entry) => entry.id !== job?.id),
+          sessionRevision: view.readiness.records[lane.id]?.revision,
+        };
+      })
+    : [];
+  const jobStatus = (status: LaneJob["status"]) =>
+    status === "submitted"
+      ? t("authoring.submitted")
+      : t(`drafting.state.${status}`);
   return (
     <section
       className="authoring-panel"
@@ -188,12 +198,55 @@ export function WorkflowAuthoring({
               : `${view.readiness.completedLanes.length}/6`}
           </Tag>
           <Table
+            className="authoring-lanes-table"
             size="small"
             rowKey="id"
             pagination={false}
-            dataSource={Object.values(view.readiness.lanes)}
+            dataSource={laneRows}
+            expandable={{
+              rowExpandable: (lane) =>
+                lane.sessionRevision !== undefined ||
+                Boolean(lane.job?.decision?.decision?.reason) ||
+                lane.earlierJobs.length > 0,
+              expandedRowRender: (lane) => (
+                <>
+                  {lane.sessionRevision !== undefined && (
+                    <dl className="gate-hashes">
+                      <dt>{t("authoring.revision")}</dt>
+                      <dd>{lane.sessionRevision}</dd>
+                    </dl>
+                  )}
+                  {lane.job?.decision?.decision?.reason && (
+                    <dl className="gate-hashes">
+                      <dt>{t("authoring.reason")}</dt>
+                      <dd>{lane.job.decision.decision.reason}</dd>
+                    </dl>
+                  )}
+                  {lane.earlierJobs.length > 0 && (
+                    <>
+                      <h4>{t("authoring.earlierJobs")}</h4>
+                      <ul className="gate-pins">
+                        {lane.earlierJobs.map((job) => (
+                          <li key={job.id}>
+                            <Space wrap>
+                              <Tag>{jobStatus(job.status)}</Tag>
+                              <time dateTime={job.createdAt}>
+                                {new Date(job.createdAt).toLocaleString(locale)}
+                              </time>
+                            </Space>
+                            {job.decision?.decision?.reason && (
+                              <p>{job.decision.decision.reason}</p>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
+              ),
+            }}
             columns={[
-              { title: t("package.lane"), dataIndex: "id" },
+              { title: t("package.lane"), dataIndex: "id", rowScope: "row" },
               {
                 title: t("authoring.status"),
                 render: (_, lane) => (
@@ -213,51 +266,57 @@ export function WorkflowAuthoring({
                 ),
               },
               {
-                title: t("authoring.revision"),
-                render: (_, lane) =>
-                  view.readiness.records[lane.id]?.revision ?? "—",
+                title: t("authoring.jobStatus"),
+                render: (_, { job }) => {
+                  if (!job)
+                    return (
+                      <span className="muted">{t("authoring.noJob")}</span>
+                    );
+                  const result = job.review?.result ?? job.result;
+                  const canReview = canManage && job.status === "submitted";
+                  const canCopy =
+                    canReview || (canManage && job.status === "queued");
+                  return (
+                    <Space orientation="vertical" size="small">
+                      <Space wrap size={[4, 4]}>
+                        <Tag>{jobStatus(job.status)}</Tag>
+                        {job.kind === "review-vote" && (
+                          <span>{t("authoring.reviewVote")}</span>
+                        )}
+                        {result &&
+                          ["claimed", "submitted"].includes(job.status) && (
+                            <span className="muted">
+                              {format("authoring.draftOutcome", {
+                                status: result.laneOutput.status,
+                              })}
+                            </span>
+                          )}
+                      </Space>
+                      {canCopy && (
+                        <Space wrap>
+                          {canReview && (
+                            <Button
+                              onClick={() => {
+                                setReview({ ...job, result });
+                                setReason("");
+                              }}
+                            >
+                              {t("authoring.inspect")}
+                            </Button>
+                          )}
+                          <AgentPromptButton
+                            key={job.id}
+                            basePath={basePath}
+                            path={`${path}/drafting-jobs/${job.id}/prompt`}
+                          />
+                        </Space>
+                      )}
+                    </Space>
+                  );
+                },
               },
             ]}
           />
-          <h4>{t("authoring.jobs")}</h4>
-          <ul className="gate-pins">
-            {view.jobs.map((job) => (
-              <li key={job.id}>
-                <Space wrap>
-                  <strong>{job.laneId}</strong>
-                  <Tag>
-                    {job.kind === "review-vote"
-                      ? t("authoring.reviewVote")
-                      : t("authoring.laneDraft")}
-                  </Tag>
-                  <Tag>{job.status}</Tag>
-                  {canManage &&
-                    ["queued", "submitted"].includes(job.status) && (
-                      <AgentPromptButton
-                        basePath={basePath}
-                        path={`${path}/drafting-jobs/${job.id}/prompt`}
-                      />
-                    )}
-                  {canManage && job.status === "submitted" && (
-                    <Button
-                      onClick={() => {
-                        setReview({
-                          ...job,
-                          result: job.review?.result ?? job.result,
-                        });
-                        setReason("");
-                      }}
-                    >
-                      {t("authoring.inspect")}
-                    </Button>
-                  )}
-                </Space>
-                {job.decision?.decision?.reason && (
-                  <p>{job.decision.decision.reason}</p>
-                )}
-              </li>
-            ))}
-          </ul>
           {view.followUps.length > 0 && (
             <>
               <h4>{t("authoring.followUps")}</h4>

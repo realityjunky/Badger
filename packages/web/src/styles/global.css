@@ -2580,6 +2580,24 @@ button.rail-link {
   max-height: 65vh;
   overflow: auto;
 }
+.authoring-lanes-table .ant-table-cell {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.authoring-lanes-table .ant-tag {
+  margin-inline-end: 0;
+  white-space: normal;
+}
+.authoring-lanes-table .ant-space,
+.authoring-lanes-table .ant-space-item,
+.authoring-lanes-table .ant-btn {
+  max-inline-size: 100%;
+}
+.authoring-lanes-table .ant-btn {
+  min-block-size: 32px;
+  block-size: auto;
+  white-space: normal;
+}
 
 .evaluation-filters {
   display: flex;

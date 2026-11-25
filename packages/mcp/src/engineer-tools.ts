@@ -82,14 +82,14 @@ export function engineerTools(
     ),
     tool(
       "submit_job",
-      "Read, validate and save result.json while keeping this session's claim. savedDraft reports the stored hash, content path and claim state; submittedResultHash identifies the parsed file sent. Original result/resultHash stay unchanged; later drafts are in job.review.result with job.currentResultHash. Repeat for follow-up changes and wait for the user before finish_job. A person accepts separately in the dashboard.",
+      "Read, validate and save result.json while keeping this session's claim. savedDraft reports the stored hash, content path and claim state; submittedResultHash identifies the parsed file sent. Original result/resultHash stay unchanged; later drafts are in job.review.result with job.currentResultHash. Repeat for follow-up changes. Follow the user's authorization for finish_job, including instructions in the copied dispatch prompt. A person accepts separately in the dashboard.",
       folder,
       (args) => finishJob(api, args, "submit", sessions),
       "compose",
     ),
     tool(
       "finish_job",
-      "When the user says this drafting session is finished, release its exclusive claim and hand the latest saved suggestions to the dashboard. Other people can then edit or claim the job again. This never accepts suggestions. Submit unsaved result.json changes first.",
+      "When the user authorizes handoff in the copied dispatch prompt or a follow-up, release this session's exclusive claim and hand the latest saved suggestions to the dashboard. Other people can then edit or claim the job again. This never accepts suggestions. Submit unsaved result.json changes first.",
       folder,
       (args) => finishJob(api, args, "finish", sessions),
       "compose",

@@ -88,6 +88,11 @@ it("offers only current Wave lanes as bounded Agent jobs and keeps submitted out
     "reference",
     "pause-points",
   ]);
+  for (const job of jobs) {
+    const { prompt } = await call(`${base}/drafting-jobs/${job.id}/prompt`);
+    expect(prompt).toContain("After saving the final draft, call finish_job");
+    expect(prompt).toContain("I authorize this handoff for the final draft");
+  }
   const script = jobs.find((j: any) => j.laneId === "script");
   const { secret } = await call(
     "/me/tokens",
@@ -104,6 +109,9 @@ it("offers only current Wave lanes as bounded Agent jobs and keeps submitted out
     engineer,
     200,
     secret,
+  );
+  expect(claimed.instructions).toContain(
+    "The person's copied dispatch prompt can authorize finish_job after the final verified save.",
   );
   expect(claimed.contextBundle.authoring).toMatchObject({
     lane: "script",
@@ -142,18 +150,37 @@ it("offers only current Wave lanes as bounded Agent jobs and keeps submitted out
     claims: [],
     artifacts: [],
   };
-  const { job: submitted } = await call(
+  const { job: saved } = await call(
     `${path}/submit`,
     "POST",
     {
       leaseId: claimed.job.lease.id,
       contextHash: claimed.job.contextHash,
       result: { laneOutput },
+      keepClaim: true,
     },
     engineer,
     200,
     secret,
   );
+  expect(saved.status).toBe("claimed");
+  const { job: submitted } = await call(
+    `${path}/finish`,
+    "POST",
+    {
+      leaseId: claimed.job.lease.id,
+      contextHash: claimed.job.contextHash,
+      revision: saved.revision,
+    },
+    engineer,
+    200,
+    secret,
+  );
+  expect(submitted).toMatchObject({
+    status: "submitted",
+    lease: null,
+    currentResultHash: saved.currentResultHash,
+  });
   expect(
     (await call(`${base}/package/authoring`)).readiness.records.script,
   ).toBeUndefined();

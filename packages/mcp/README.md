@@ -100,7 +100,7 @@ and `versionId`; job tools also take `jobId`.
 | `save_working_dossier`    | Save an edit against the job's `revision` and `pinsHash`. Returns the revision that saved the edit, the current revision, and the dashboard review link.                                     |
 | `claim_job`               | Quote a queued or submitted job's `revision`; claim it and return a private local folder with context, schema, pinned files, and the latest saved suggestions in `result.json` when present. |
 | `submit_job`              | Supply the claimed `folder`. Validate and save `result.json` while retaining this session's exclusive claim for repeated follow-up changes.                                                  |
-| `finish_job`              | When the person says the drafting session is finished, hand the latest saved suggestions to the dashboard and release the claim for editing or another Agent.                                |
+| `finish_job`              | When the person authorizes handoff, hand the latest saved suggestions to the dashboard and release the claim for editing or another Agent.                                                   |
 | `release_job`             | End this session's claim. Saved suggestions become available for review; a job without suggestions returns to the queue.                                                                     |
 | `questionnaire`           | Read the workflow version's questionnaire, including draft questions and submitted suggestions.                                                                                              |
 | `ledger`                  | Read the kernel's five-part ledger and optional `sinceRound` changes.                                                                                                                        |
@@ -148,11 +148,12 @@ contain workflow evidence. General large-result files remain connection-local.
 `submit_job` keeps the dashboard status **Claimed**, including after the first
 valid result. The same session can edit `result.json` and submit again. Other
 people cannot edit, accept, discard or claim that job while the claim is active.
-Call `finish_job` only when the person says the drafting session is finished;
-do not finish automatically after submitting. It releases the latest saved
-result without accepting it. The Engineer can copy the job's Agent prompt
+The copied Agent prompt authorizes `finish_job` after the final draft is saved
+and verified. When drafting directly through MCP, follow the person's instructions
+on when to finish. After handoff, the Engineer can copy the job's Agent prompt
 again to continue from all saved edits, or authorized people can edit in the
 dashboard. Original submissions and later review revisions remain preserved.
+Acceptance is a separate dashboard action.
 
 New jobs include a server-owned template snapshot. Claim writes its assembled
 processing instructions to `instructions.md` beside the schema and context;
