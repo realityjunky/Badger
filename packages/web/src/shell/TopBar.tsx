@@ -12,7 +12,7 @@ import {
   Typography,
   type MenuProps,
 } from "antd";
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { pageTitleKey } from "../app/navigation.js";
 import { readBasePath } from "../app/paths.js";
@@ -27,10 +27,15 @@ import { scopeSelection, type ScopeSelection } from "./scope.js";
 export interface TopBarProps {
   drawerMode: boolean;
   onOpenRail(): void;
+  workflowHeadingRef?: Ref<HTMLDivElement>;
 }
 
 /** The sticky bar shows page context and shared dashboard actions. */
-export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
+export function TopBar({
+  drawerMode,
+  onOpenRail,
+  workflowHeadingRef,
+}: TopBarProps) {
   const demoMode = useDemoMode();
   const { t, format } = useI18n();
   const { preferences, person, update } = usePreferences();
@@ -139,7 +144,9 @@ export function TopBar({ drawerMode, onOpenRail }: TopBarProps) {
         />
       )}
 
-      {pageTitle === "page.skills.title" ? (
+      {workflowHeadingRef ? (
+        <div className="top-bar-workflow" ref={workflowHeadingRef} />
+      ) : pageTitle === "page.skills.title" ? (
         <h1 className="top-bar-title">{t(pageTitle)}</h1>
       ) : administration ? (
         <Typography.Text>{t("admin.context")}</Typography.Text>

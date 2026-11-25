@@ -2,10 +2,20 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const base = "http://127.0.0.1:4320/badger";
 
-async function expectScrollNear(page: Page, position: number) {
+function scrollPosition(page: Page, container?: Locator) {
+  return container === undefined
+    ? page.evaluate(() => window.scrollY)
+    : container.evaluate((element) => element.scrollTop);
+}
+
+async function expectScrollNear(
+  page: Page,
+  position: number,
+  container?: Locator,
+) {
   await expect
     .poll(async () =>
-      Math.abs((await page.evaluate(() => window.scrollY)) - position),
+      Math.abs((await scrollPosition(page, container)) - position),
     )
     .toBeLessThan(100);
 }
@@ -57,14 +67,15 @@ async function keepScrollDuringRefresh(
   url: string,
   content: Locator,
   action: () => Promise<void>,
+  container?: Locator,
 ) {
   const refresh = await holdRefresh(page, url);
-  const before = await page.evaluate(() => window.scrollY);
+  const before = await scrollPosition(page, container);
   try {
     await action();
     await refresh.started;
     await expect(content).toBeVisible();
-    await expectScrollNear(page, before);
+    await expectScrollNear(page, before, container);
   } finally {
     await refresh.release();
   }
@@ -93,18 +104,19 @@ async function call<T>(
   );
 }
 
-test("assigning and removing workflow roles keep the page's scroll position", async ({
+test("Config preserves workflow edits and scroll position during role changes", async ({
   page,
 }) => {
   await page.goto(`${base}/my-work`);
   await page.getByTestId("language-switch").click();
   await page.getByRole("menuitem", { name: "English" }).click();
   const name = `scroll-journey-${Date.now()}`;
+  const groupName = `${name}-group`;
   const { group } = await call<{ group: { id: string } }>(
     page,
     "POST",
     "/groups",
-    { name },
+    { name: groupName },
   );
   const { workflow, version } = await call<{
     workflow: { id: string };
@@ -124,31 +136,48 @@ test("assigning and removing workflow roles keep the page's scroll position", as
       role: "Field expert",
     });
   const workflowUrl = `${base}/workflows/${workflow.id}/versions/${version.id}`;
-  await page.goto(`${workflowUrl}#notifications`);
-  const team = page.locator(".workflow-panel").filter({
-    has: page.getByRole("heading", { name: "Workflow team", exact: true }),
+  await page.goto(workflowUrl);
+  const banner = page.getByTestId("top-bar");
+  await expect(
+    banner.getByRole("heading", { name, exact: true }),
+  ).toBeVisible();
+  await expect(banner.getByText(groupName, { exact: true })).toBeVisible();
+  const links = page.getByRole("navigation", { name, exact: true });
+  await expect(links.getByRole("link")).toHaveText([
+    "Config",
+    "Runs",
+    "Questionnaire",
+    "Notifications and reminders",
+  ]);
+  await links
+    .getByRole("link", { name: "Notifications and reminders" })
+    .click();
+  await expect(page).toHaveURL(`${workflowUrl}#notifications`);
+  await expect(
+    page.getByRole("button", { name: "Start new version", exact: true }),
+  ).toBeHidden();
+  const notifications = page.getByRole("region", {
+    name: "Notifications and reminders",
+    exact: true,
   });
-  const tabRows = page.locator(
-    ".workflow-tabs-navigation-shell .workflow-tabs-navigation",
-  );
-  await expect(tabRows).toHaveCount(2);
-  const primaryTabRow = await tabRows.nth(0).boundingBox();
-  const secondaryTabRow = await tabRows.nth(1).boundingBox();
-  expect(secondaryTabRow?.y).toBeGreaterThan(primaryTabRow?.y ?? -1);
-  await expect(page.locator(".workflow-tabs-secondary-row")).toContainText(
-    "Workflow team",
-  );
-  const robotSettings = page.getByRole("button", {
+  const robotSettings = notifications.getByRole("button", {
     name: "Team chat robot",
     exact: true,
   });
   await robotSettings.click();
-  const saveRobot = page.getByRole("button", {
+  const saveRobot = notifications.getByRole("button", {
     name: "Save and send test post",
     exact: true,
   });
   await expect(saveRobot).toBeVisible();
-  await page.goto(`${workflowUrl}#team`);
+  await links.getByRole("link", { name: "Config", exact: true }).click();
+  const config = page.getByRole("dialog", { name: "Config", exact: true });
+  const dialogBody = config.locator(".ant-modal-body");
+  const team = config.getByRole("region", { name: "Workflow team" });
+  const nameField = config.getByRole("textbox", { name: /Workflow name/u });
+  await expect(nameField).toHaveValue(name);
+  const renamed = `${name}-updated`;
+  await nameField.fill(renamed);
   await team
     .getByRole("combobox", { name: /Email/u })
     .fill("scroll@example.com");
@@ -162,20 +191,23 @@ test("assigning and removing workflow roles keep the page's scroll position", as
   await expect(roleSelect).toContainText("Field expert");
   const assign = team.getByRole("button", { name: /Assign role$/u });
   await assign.scrollIntoViewIfNeeded();
-  const beforeAssign = await page.evaluate(() => window.scrollY);
-  const assignBox = await assign.boundingBox();
-  const viewportHeight = await page.evaluate(() => window.innerHeight);
-  if (assignBox !== null && assignBox.y + assignBox.height > viewportHeight)
-    expect(beforeAssign).toBeGreaterThan(100);
+  const beforeAssign = await scrollPosition(page, dialogBody);
+  expect(beforeAssign).toBeGreaterThan(0);
   const detailUrl = `${base}/api/v1/workflows/${workflow.id}`;
-  await keepScrollDuringRefresh(page, detailUrl, team, () => assign.click());
+  await keepScrollDuringRefresh(
+    page,
+    detailUrl,
+    team,
+    () => assign.click(),
+    dialogBody,
+  );
   const binding = team
     .getByRole("row")
     .filter({ hasText: "scroll@example.com" });
   await expect(binding).toBeVisible();
-  await expectScrollNear(page, beforeAssign);
+  await expectScrollNear(page, beforeAssign, dialogBody);
   await expect(roleSelect).toContainText("Field expert");
-  await expect(saveRobot).toBeHidden();
+  await expect(nameField).toHaveValue(renamed);
 
   await team
     .getByRole("combobox", { name: /Email/u })
@@ -207,20 +239,47 @@ test("assigning and removing workflow roles keep the page's scroll position", as
   await expect(confirm).toBeVisible();
   await waitForAnimations(confirmation);
   await confirm.scrollIntoViewIfNeeded();
-  const beforeRemove = await page.evaluate(() => window.scrollY);
+  const beforeRemove = await scrollPosition(page, dialogBody);
   const confirmBox = await confirm.boundingBox();
   expect(confirmBox).not.toBeNull();
-  await keepScrollDuringRefresh(page, detailUrl, team, () =>
-    page.mouse.click(
-      confirmBox!.x + confirmBox!.width / 2,
-      confirmBox!.y + confirmBox!.height / 2,
-    ),
+  await keepScrollDuringRefresh(
+    page,
+    detailUrl,
+    team,
+    () =>
+      page.mouse.click(
+        confirmBox!.x + confirmBox!.width / 2,
+        confirmBox!.y + confirmBox!.height / 2,
+      ),
+    dialogBody,
   );
   await expect(binding).toHaveCount(1);
   await expect(binding.locator(".ant-tag")).toHaveText(["Observer · Invited"]);
-  await expectScrollNear(page, beforeRemove);
-  await page.goto(`${workflowUrl}#notifications`);
+  await expectScrollNear(page, beforeRemove, dialogBody);
+  await config
+    .getByRole("button", { name: "Save changes", exact: true })
+    .click();
+  await expect(config).toBeHidden();
+  await expect(
+    banner.getByRole("heading", { name: renamed, exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(`${workflowUrl}#notifications`);
   await expect(saveRobot).toBeVisible();
+
+  await page.goto(`${workflowUrl}#team`);
+  await expect(team).toBeVisible();
+  await config.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(config).toBeHidden();
+  await expect(page).toHaveURL(workflowUrl);
+  const versionPanel = page.getByRole("region", {
+    name: "Version",
+    exact: true,
+  });
+  await versionPanel.getByRole("button", { name: "Start new version" }).click();
+  const newVersion = page.getByRole("dialog", { name: "Start new version" });
+  await newVersion.getByRole("button", { name: "Start new version" }).click();
+  await expect(versionPanel.getByText("0.1.1", { exact: true })).toBeVisible();
+  await expect(page).not.toHaveURL(workflowUrl);
 });
 
 test("refreshing a Run keeps the scrolled report and expanded sections mounted", async ({

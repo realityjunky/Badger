@@ -28,7 +28,9 @@ them into `dist/`, so the server image carries the build and none of them.
 Activity sits under Administration in the sidebar. My work uses compact
 summary cards with each value and label side by side. Workflow cards keep
 their Group, goal, version, intent, and locale in one metadata row, wrapping
-as needed on narrow screens.
+as needed on narrow screens. A workflow's banner shows its name and Group.
+Config opens the workflow frame and team assignments together. The Version
+tab holds the version picker and the action to start a new version.
 
 - **Admin → Prompt templates** lists instructions by all eight workflow stages
   and by Agent drafting, Agent assistance and human review. Signed-in
@@ -140,7 +142,7 @@ as needed on narrow screens.
   the ledger and readiness (#76). The service's kernel handoff supplies all
   membership and readiness decisions. The view and comparison round have URLs
   and retain the deployment base path.
-- Workflow versions include a **Dossier versions** panel (#50). Engineers
+- Workflow versions include a **Dossier** panel (#50). Engineers
   author topic summaries, supporting fact links, and Node responsibilities,
   review kernel findings and the canonical snapshot, then compose an immutable
   version. Workflow owners review and approve its exact hash in a separate
@@ -155,7 +157,7 @@ as needed on narrow screens.
   question, an accepted Fact source, or a decline with a reason. The question
   composer and round publication flow handle converted concerns. All records
   keep direct links and refresh through the existing live updates.
-- Workflow versions include **Plan versions** (#58). The approved dossier
+- Workflow versions include **Plans** (#58). The approved dossier
   supplies a skeleton and pins. Engineers edit FactoryPlan JSON with live
   kernel findings, review the resulting canonical version, and save it, or
   request an Agent draft and review, edit, accept, or discard its suggestion.
@@ -164,7 +166,7 @@ as needed on narrow screens.
   earlier version's content selects it again. Historical versions have URLs;
   stale edits and approvals conflict, and a superseded dossier invalidates
   dependent approvals and notifies both roles.
-- Workflow versions include **Proposal and initialization** (#59). Once the
+- Workflow versions include **Proposal & initialization** (#59). Once the
   current plan is approved, the pane shows the kernel's proposal: its hash,
   the plan version hash, the pinned sources, any blockers, and the current
   Creator state's hash when the project has one. Workflow owners approve the
@@ -176,15 +178,14 @@ as needed on narrow screens.
   **Start new version** asks first, naming what the new version takes: the
   current frame and the latest version's Skill pins, facts, answers, and
   resolutions; pending questionnaire work moves to it, flagged items stay
-  open, and approvals need a new review. An inherited version links to its
-  predecessor. Inherited questions and source-study records link to their
-  originals in the earlier version, and inherited facts and ledger items to
-  that version's ledger. A question, fact, or source-study record whose cited
-  evidence changed shows a warning and each changed file before and after,
-  side by side, loaded only when expanded. The Sources, dossier, plan, and
-  proposal panes list every approval of their gate, with the approver, time,
-  and reason, and mark the ones a later change superseded, so a re-pin never
-  hides an earlier approval.
+  open, and approvals need a new review. Inherited questions and source-study
+  records link to their originals in the earlier version, and inherited facts
+  and ledger items to that version's ledger. A question, fact, or source-study
+  record whose cited evidence changed shows a warning and each changed file
+  before and after, side by side, loaded only when expanded. The Sources,
+  dossier, plan, and proposal panes list every approval of their gate, with
+  the approver, time, and reason, and mark the ones a later change superseded,
+  so a re-pin never hides an earlier approval.
 
 - **Start new version** offers an optional `major.minor.patch` label, manual
   entry, and Patch / Minor / Major suggestions from the most recent labelled
@@ -384,7 +385,7 @@ as needed on narrow screens.
   packages, and opens each report's package checks, Authoring
   cross-validation, certification phases with their negative cases, and
   artifact receipts.
-- Workflow versions include **Review and publication** (#63). For the current
+- Workflow versions include **Review & publication** (#63). For the current
   package the panel shows Authoring, runtime, and publication readiness with
   any blockers, and the review history. The Workflow owner or Administrator
   previews and confirms approval of the exact package hash, then previews and

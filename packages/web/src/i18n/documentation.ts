@@ -84,7 +84,7 @@ export const documentationEn = {
   "documentation.my-work.next":
     "Follow the item to its evidence, review what changed, and use the action offered for your role. Return to My work to find the next item.",
   "documentation.workflows.purpose":
-    "Choose a Group, Workflow, and version before working on a stage. Use the version's tabs to work through its stages. Use Workflow team to review assignments and Notifications to review routing. Visited tabs keep your local edits as you switch between them.",
+    "Choose a workflow from Workflows, then select a version in the Version tab. Open Config to review the workflow frame and role assignments. Use Notifications and reminders to review routing. Visited tabs keep your local edits as you switch between them.",
   "documentation.workflows.roles":
     "Group leads and Administrators create Workflows. The Workflow owner manages the team and approves and publishes its work. A Workflow can have one Engineer, including a pending invitation. Remove the current assignment before replacing it. The Engineer pins and studies sources and builds and evaluates the package. Administrators can also perform Engineer and Workflow owner actions.",
   "documentation.workflows.sources":
@@ -230,7 +230,7 @@ export const documentationEn = {
   "documentation.evaluations.report":
     "Open a report to review package checks, Authoring cross-validation, certification phases and negative cases, duration, and artifact receipts. Compare its hash with the current package and fix reported blockers before evaluating changed content.",
   "documentation.evaluations.next":
-    "With a passing report for the current hash, return to Workflows → Review and publication for the Workflow owner's explicit approval and publication confirmations.",
+    "With a passing report for the current hash, return to Workflows → Review & publication for the Workflow owner's explicit approval and publication confirmations.",
   "documentation.activity.purpose":
     "Open Activity under Administration in the sidebar. It is the append-only record of who acted, when, on what target, through which channel, and with what reason. Use it for review and investigation; its navigation location does not change access permissions.",
   "documentation.activity.roles":
@@ -371,7 +371,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.my-work.next":
     "跟随消息查看证据，审阅变更，并使用您的角色可执行的操作。返回“我的工作”继续处理下一项。",
   "documentation.workflows.purpose":
-    "先选择团队、工作流和版本，再通过版本的选项卡逐步处理各阶段。通过“工作流团队”查看角色分配，通过“通知”查看路由。切换选项卡时，已访问的选项卡会保留本地编辑。",
+    "从“工作流”列表打开工作流，再在“版本”选项卡中选择版本。通过“配置”查看工作流信息和角色分配，通过“通知与提醒”查看路由。切换选项卡时，已访问的选项卡会保留本地编辑。",
   "documentation.workflows.roles":
     "团队负责人和管理员可创建工作流。工作流负责人管理团队、批准各阶段成果并确认发布。每个工作流可分配一名工程师，待接受的邀请也占用此名额。更换工程师前，请先移除当前分配。工程师负责固定并研读来源，以及构建和评估工作流包。管理员也可执行工程师和工作流负责人的操作。",
   "documentation.workflows.sources":

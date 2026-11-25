@@ -796,6 +796,20 @@ button.rail-link {
   letter-spacing: -0.01em;
 }
 
+.top-bar-workflow {
+  display: flex;
+  flex: 1 1 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 12px;
+  min-width: min(100%, 8rem);
+  overflow-wrap: anywhere;
+}
+
+.top-bar-workflow > * {
+  max-width: 100%;
+}
+
 .scope-selector {
   display: flex;
   align-items: center;
@@ -1095,6 +1109,24 @@ button.rail-link {
   flex-wrap: wrap;
 }
 
+.workflow-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 16px;
+  margin-bottom: 12px;
+}
+
+.workflow-links a {
+  padding-block: 4px;
+  color: var(--badger-color-accent);
+}
+
+.workflow-links a[aria-current] {
+  font-weight: 600;
+  text-decoration: underline;
+}
+
 .workflow-catalog {
   display: grid;
   gap: 20px;
@@ -1180,6 +1212,14 @@ button.rail-link {
   margin-bottom: 16px;
 }
 
+.workflow-version-goal {
+  margin-top: 16px;
+}
+
+.workflow-version-goal summary {
+  cursor: pointer;
+}
+
 .workflow-card .stage-track,
 .workflow-panel .stage-track {
   margin-bottom: 0;
@@ -1216,6 +1256,20 @@ button.rail-link {
 
 .workflow-frame-form {
   margin-top: 20px;
+}
+
+.workflow-config-dialog {
+  top: 24px;
+}
+
+.workflow-config-dialog .ant-modal-body {
+  max-height: min(72dvh, 50rem);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.workflow-config-dialog .workflow-panel {
+  margin-block: 20px 0;
 }
 
 @media (max-width: 720px) {
@@ -1614,11 +1668,6 @@ button.rail-link {
   .workflow-tabs-navigation
   > .ant-tabs-content-holder {
   display: none;
-}
-
-.workflow-tabs-secondary-row {
-  margin-top: 4px;
-  border-top: 1px solid var(--badger-color-border);
 }
 
 .workflow-tabs-content > .ant-tabs-nav {

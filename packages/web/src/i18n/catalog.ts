@@ -19,7 +19,7 @@ const en = {
   "inbox.publicationReady": "{name} · {version}: publish the reviewed package",
   "inbox.publicationInvalidated":
     "{name} · {version}: publication readiness invalidated",
-  "publication.title": "Review and publication",
+  "publication.title": "Review & publication",
   "publication.description":
     "The Workflow owner approves the exact package and confirms publication.",
   "publication.failed": "Could not load review and publication.",
@@ -186,7 +186,7 @@ const en = {
   "inbox.generationInvalidated":
     "{name} · {version}: generation confirmation superseded",
 
-  "proposal.title": "Proposal and initialization",
+  "proposal.title": "Proposal & initialization",
   "proposal.description":
     "Review the kernel's proposal for the approved plan. The Workflow owner approves it before the Engineer initializes the project.",
   "proposal.needPlan": "Approve the current plan to see its proposal.",
@@ -217,7 +217,7 @@ const en = {
   "inbox.proposalReady": "{name} · {version}: approve the proposal",
   "inbox.proposalInvalidated":
     "{name} · {version}: proposal approval superseded",
-  "plan.title": "Plan versions",
+  "plan.title": "Plans",
   "plan.description":
     "Draft from the approved dossier, review the kernel's findings, and save an immutable plan for the Workflow owner's approval.",
   "plan.needDossier": "Approve the current dossier before planning.",
@@ -432,7 +432,7 @@ const en = {
   "notifications.event.question-reopened": "Question reopened",
   "notifications.event.concern-raised": "Expert concern raised",
   "notifications.event.job-submitted": "Draft submitted",
-  "dossier.title": "Dossier versions",
+  "dossier.title": "Dossier",
   "workingDossier.title": "Working dossier",
   "workingDossier.revision": "Working dossier revision {revision}",
   "workingDossier.copyPrompt": "Copy prompt",
@@ -1307,10 +1307,9 @@ const en = {
   "page.placeholder": "This page arrives with a later step.",
 
   "workflow.create": "Create workflow",
-  "workflow.edit": "Edit workflow",
+  "workflow.config": "Config",
   "workflow.save": "Save changes",
   "workflow.cancel": "Cancel",
-  "workflow.back": "All workflows",
   "workflow.group": "Group",
   "workflow.name": "Workflow name",
   "workflow.nameHint":
@@ -1348,7 +1347,6 @@ const en = {
   "workflow.versionBump.major": "Major",
   "workflow.newVersionConfirm":
     "Start a new version with the current frame and the latest version's Skill pins, facts, answers, and resolutions? Pending questionnaire work moves to the new version, and flagged items stay open. Approvals require a new review.",
-  "versions.inheritedVersion": "Inherited from the previous workflow version",
   "versions.approvalRecorded": "Approval recorded",
   "versions.approvalSuperseded": "Approval superseded",
   "versions.inheritedRecord":
@@ -1535,7 +1533,7 @@ const en = {
   "stage.planProposal": "Plan and proposal",
   "stage.package": "Package",
   "stage.evaluation": "Evaluation",
-  "stage.reviewPublication": "Review and publication",
+  "stage.reviewPublication": "Review & publication",
   "status.inProgress": "In progress",
   "status.done": "Done",
   "status.notStarted": "Not started",
@@ -1889,7 +1887,7 @@ const zh: Record<MessageId, string> = {
   "proposal.failed": "提案请求失败，请重新加载后重试。",
   "inbox.proposalReady": "{name} · {version}：等待批准提案",
   "inbox.proposalInvalidated": "{name} · {version}：提案审批已失效",
-  "plan.title": "计划版本",
+  "plan.title": "计划",
   "plan.description":
     "从已批准的语义档案起草计划，查看内核校验结果，并保存不可变的计划版本供工作流所有者批准。",
   "plan.needDossier": "请先批准当前语义档案，再开始计划。",
@@ -2090,7 +2088,7 @@ const zh: Record<MessageId, string> = {
   "notifications.event.question-reopened": "问题重新开放",
   "notifications.event.concern-raised": "专家提出关切",
   "notifications.event.job-submitted": "草稿提交",
-  "dossier.title": "语义档案版本",
+  "dossier.title": "语义档案",
   "workingDossier.title": "工作档案",
   "workingDossier.revision": "工作档案修订 {revision}",
   "workingDossier.copyPrompt": "复制提示词",
@@ -2658,10 +2656,9 @@ const zh: Record<MessageId, string> = {
   "questionnaire.openQuestion": "打开问题",
   "questionnaire.sourceConcern": "来源关切",
   "workflow.create": "创建工作流",
-  "workflow.edit": "编辑工作流",
+  "workflow.config": "配置",
   "workflow.save": "保存更改",
   "workflow.cancel": "取消",
-  "workflow.back": "所有工作流",
   "workflow.group": "分组",
   "workflow.name": "工作流名称",
   "workflow.nameHint": "2–64 个小写字母、数字或连字符，以字母开头。",
@@ -2696,7 +2693,6 @@ const zh: Record<MessageId, string> = {
   "workflow.versionBump.major": "主版本",
   "workflow.newVersionConfirm":
     "使用当前工作流信息，继承最新版本的 Skill 固定版本、事实、回答和处理结果？待处理的问卷事项将转到新版本，已标记项将保持待确认，审批需要重新审核。",
-  "versions.inheritedVersion": "继承自上一工作流版本",
   "versions.approvalRecorded": "审批已记录",
   "versions.approvalSuperseded": "审批已被替代",
   "versions.inheritedRecord": "查看早期版本中的继承记录（修订 {revision}）",

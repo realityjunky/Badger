@@ -1,8 +1,11 @@
 import { Alert, Button, Select, Space, Tag } from "antd";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Link,
+  useLocation,
   useNavigate,
+  useOutletContext,
   useParams,
   useSearchParams,
 } from "react-router-dom";
@@ -30,7 +33,7 @@ import { workflowVersionLabel } from "../util/workflowVersion.js";
 import { WorkflowTeam } from "./workflows/WorkflowTeam.js";
 import { WorkflowSources } from "./workflows/WorkflowSources.js";
 import { WorkflowPanel } from "./workflows/WorkflowPanel.js";
-import { WorkflowTabs } from "./workflows/WorkflowTabs.js";
+import { selectedWorkflowTab, WorkflowTabs } from "./workflows/WorkflowTabs.js";
 import { WorkflowSourceStudy } from "./workflows/WorkflowSourceStudy.js";
 import { WorkflowDossier } from "./workflows/WorkflowDossier.js";
 import { WorkflowPlan } from "./workflows/WorkflowPlan.js";
@@ -50,6 +53,8 @@ export function WorkflowsPage() {
   const { t } = useI18n();
   const { notice } = useLiveUpdates();
   const { workflowId, versionId } = useParams();
+  const location = useLocation();
+  const headingTarget = useOutletContext<HTMLDivElement | null>();
   const [parameters] = useSearchParams();
   const requestedVersionId = versionId ?? parameters.get("version");
   const groupId = parameters.get("group");
@@ -57,9 +62,7 @@ export function WorkflowsPage() {
   const basePath = readBasePath(document);
   const [state, setState] = useState<State>({ kind: "loading" });
   const [refresh, setRefresh] = useState(0);
-  const [dialog, setDialog] = useState<
-    { kind: "create" } | { kind: "edit"; workflow: Workflow } | null
-  >(null);
+  const [creating, setCreating] = useState(false);
   const [versionDialog, setVersionDialog] = useState<{
     workflow: Workflow;
     version: WorkflowVersion | null;
@@ -67,16 +70,25 @@ export function WorkflowsPage() {
   } | null>(null);
   const [versionResources, setVersionResources] =
     useState<WorkflowVersionDetail | null>(null);
-  const detail = state.kind === "detail" ? state.value : null;
+  const catalog =
+    workflowId === undefined && state.kind === "catalog" ? state.value : null;
+  const detail =
+    state.kind === "detail" && state.value.workflow.id === workflowId
+      ? state.value
+      : null;
   const workflow = detail?.workflow;
   const selectedVersion =
     requestedVersionId === null
       ? detail?.versions[0]
       : detail?.versions.find((entry) => entry.id === requestedVersionId);
+  const tab = selectedWorkflowTab(location);
+  const config = parameters.has("config") || tab === "team" ? detail : null;
+  const configSearch = new URLSearchParams(parameters);
+  configSearch.set("config", "1");
 
   useEffect(() => {
     setState({ kind: "loading" });
-    setDialog(null);
+    setCreating(false);
     setVersionDialog(null);
   }, [basePath, workflowId]);
 
@@ -191,59 +203,54 @@ export function WorkflowsPage() {
 
   const reload = () => setRefresh((value) => value + 1);
 
+  function closeWorkflowDialog() {
+    if (config === null) {
+      setCreating(false);
+      return;
+    }
+    if (location.state?.configLink) {
+      navigate(-1);
+      return;
+    }
+    const next = new URLSearchParams(parameters);
+    next.delete("config");
+    if (next.get("stage") === "team") next.delete("stage");
+    navigate(
+      {
+        pathname: location.pathname,
+        search: next.toString(),
+        hash: location.hash === "#team" ? "" : location.hash,
+      },
+      { replace: true },
+    );
+  }
+
   return (
     <div className="page workflow-page" data-testid="page-workflows">
-      <PageHeader
-        title={workflow?.name ?? t("page.workflows.title")}
-        description={workflow?.goal ?? t("page.workflows.description")}
-        actions={
-          <Space wrap>
-            {workflow && (
-              <Link to={`/runs?workflow=${encodeURIComponent(workflow.id)}`}>
-                {t("page.runs.title")}
-              </Link>
-            )}
-            {workflow && selectedVersion && (
-              <Link
-                to={`/questionnaire?workflow=${encodeURIComponent(workflow.id)}&version=${encodeURIComponent(selectedVersion.id)}`}
-              >
-                {t("page.questionnaire.title")}
-              </Link>
-            )}
-            {workflowId !== undefined && (
-              <Link to="/workflows">{t("workflow.back")}</Link>
-            )}
-            {state.kind === "catalog" &&
-              state.value.createGroups.length > 0 && (
-                <Button
-                  type="primary"
-                  onClick={() => setDialog({ kind: "create" })}
-                >
-                  {t("workflow.create")}
-                </Button>
-              )}
-            {detail?.capabilities.editWorkflow && workflow !== undefined && (
-              <Button onClick={() => setDialog({ kind: "edit", workflow })}>
-                {t("workflow.edit")}
+      {workflowId === undefined ? (
+        <PageHeader
+          title={t("page.workflows.title")}
+          description={t("page.workflows.description")}
+          actions={
+            catalog && catalog.createGroups.length > 0 ? (
+              <Button type="primary" onClick={() => setCreating(true)}>
+                {t("workflow.create")}
               </Button>
-            )}
-            {detail?.capabilities.createVersion && (
-              <Button
-                type="primary"
-                onClick={() =>
-                  setVersionDialog({
-                    workflow: detail.workflow,
-                    version: null,
-                    versions: detail.versions,
-                  })
-                }
-              >
-                {t("workflow.newVersion")}
-              </Button>
-            )}
-          </Space>
-        }
-      />
+            ) : undefined
+          }
+        />
+      ) : (
+        headingTarget &&
+        createPortal(
+          <>
+            <h1 className="top-bar-title" id="workflow-heading">
+              {workflow?.name ?? t("page.workflows.title")}
+            </h1>
+            {detail && <span className="muted">{detail.groupName}</span>}
+          </>,
+          headingTarget,
+        )
+      )}
       {state.kind === "loading" && (
         <p role="status" className="muted">
           {t("common.loading")}
@@ -260,14 +267,14 @@ export function WorkflowsPage() {
           action={<Button onClick={reload}>{t("workflow.reload")}</Button>}
         />
       )}
-      {state.kind === "catalog" && (
+      {catalog && (
         <div className="workflow-catalog">
-          {state.value.workflows.filter(
+          {catalog.workflows.filter(
             (entry) => !groupId || entry.groupId === groupId,
           ).length === 0 && (
             <p className="empty-state">{t("workflow.empty")}</p>
           )}
-          {state.value.workflows
+          {catalog.workflows
             .filter((entry) => !groupId || entry.groupId === groupId)
             .map((entry) => (
               <article className="workflow-card" key={entry.id}>
@@ -305,29 +312,67 @@ export function WorkflowsPage() {
       )}
       {detail !== null && (
         <>
-          <p className="muted">{detail.groupName}</p>
+          <nav className="workflow-links" aria-labelledby="workflow-heading">
+            <Link
+              aria-haspopup="dialog"
+              state={{ configLink: true }}
+              to={{
+                pathname: location.pathname,
+                search: configSearch.toString(),
+                hash: location.hash,
+              }}
+            >
+              {t("workflow.config")}
+            </Link>
+            <Link
+              to={`/runs?workflow=${encodeURIComponent(detail.workflow.id)}`}
+            >
+              {t("page.runs.title")}
+            </Link>
+            {selectedVersion && (
+              <Link
+                to={`/questionnaire?workflow=${encodeURIComponent(detail.workflow.id)}&version=${encodeURIComponent(selectedVersion.id)}`}
+              >
+                {t("page.questionnaire.title")}
+              </Link>
+            )}
+            <Link
+              to={{
+                pathname: location.pathname,
+                search: location.search,
+                hash: "notifications",
+              }}
+              aria-current={tab === "notifications" ? "location" : undefined}
+            >
+              {t("notifications.title")}
+            </Link>
+          </nav>
           <WorkflowTabs
             key={`${detail.workflow.id}:${selectedVersion?.id ?? "missing"}`}
-            secondaryKeys={["team", "notifications"]}
+            linkedPanel={{
+              key: "notifications",
+              label: t("notifications.title"),
+              children: (
+                <WorkflowNotifications
+                  key={detail.workflow.id}
+                  basePath={basePath}
+                  workflowId={detail.workflow.id}
+                  mayManage={detail.capabilities.approveDossier}
+                />
+              ),
+            }}
             items={[
               {
                 key: "version",
                 label: t("workflow.version"),
-                children:
-                  selectedVersion === undefined ? (
-                    <Alert
-                      type="warning"
-                      showIcon
-                      message={t("workflow.versionMissing")}
-                    />
-                  ) : (
-                    <WorkflowPanel
-                      key={selectedVersion.id}
-                      id="version"
-                      title={t("workflow.version")}
-                      aria-labelledby="workflow-version-title"
-                      actions={
-                        <Space wrap>
+                children: (
+                  <WorkflowPanel
+                    id="version"
+                    title={t("workflow.version")}
+                    aria-labelledby="workflow-version-title"
+                    actions={
+                      <Space wrap>
+                        {selectedVersion && (
                           <Select
                             aria-label={t("workflow.version")}
                             value={selectedVersion.id}
@@ -341,7 +386,9 @@ export function WorkflowsPage() {
                               label: workflowVersionLabel(entry),
                             }))}
                           />
-                          {detail.capabilities.createVersion && (
+                        )}
+                        {detail.capabilities.createVersion &&
+                          selectedVersion && (
                             <Button
                               onClick={() =>
                                 setVersionDialog({
@@ -354,39 +401,59 @@ export function WorkflowsPage() {
                               {t("workflow.editVersionLabel")}
                             </Button>
                           )}
-                        </Space>
-                      }
-                    >
-                      <p>{selectedVersion.goal}</p>
-                      {selectedVersion.inheritedFromVersionId && (
-                        <p>
-                          <Link
-                            to={`/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(selectedVersion.inheritedFromVersionId)}`}
+                        {detail.capabilities.createVersion && (
+                          <Button
+                            type="primary"
+                            onClick={() =>
+                              setVersionDialog({
+                                workflow: detail.workflow,
+                                version: null,
+                                versions: detail.versions,
+                              })
+                            }
                           >
-                            {t("versions.inheritedVersion")}
-                          </Link>
-                        </p>
-                      )}
-                      <Space wrap className="workflow-version-meta">
-                        <Tag>{selectedVersion.name}</Tag>
-                        <Tag>
-                          {t(
-                            selectedVersion.intent === "new-skill"
-                              ? "workflow.intent.new"
-                              : "workflow.intent.upgrade",
-                          )}
-                        </Tag>
-                        <Tag>{selectedVersion.locale}</Tag>
+                            {t("workflow.newVersion")}
+                          </Button>
+                        )}
                       </Space>
-                      <StageTrack
-                        stages={
-                          versionResources?.version.id === selectedVersion.id
-                            ? versionResources.version.stages
-                            : selectedVersion.stages
-                        }
+                    }
+                  >
+                    {selectedVersion === undefined ? (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        message={t("workflow.versionMissing")}
                       />
-                    </WorkflowPanel>
-                  ),
+                    ) : (
+                      <>
+                        <Space wrap className="workflow-version-meta">
+                          {selectedVersion.name !== detail.workflow.name && (
+                            <Tag>{selectedVersion.name}</Tag>
+                          )}
+                          <Tag>
+                            {t(
+                              selectedVersion.intent === "new-skill"
+                                ? "workflow.intent.new"
+                                : "workflow.intent.upgrade",
+                            )}
+                          </Tag>
+                          <Tag>{selectedVersion.locale}</Tag>
+                        </Space>
+                        <StageTrack
+                          stages={
+                            versionResources?.version.id === selectedVersion.id
+                              ? versionResources.version.stages
+                              : selectedVersion.stages
+                          }
+                        />
+                        <details className="workflow-version-goal">
+                          <summary>{t("workflow.goal")}</summary>
+                          <p>{selectedVersion.goal}</p>
+                        </details>
+                      </>
+                    )}
+                  </WorkflowPanel>
+                ),
               },
               ...(versionResources !== null &&
               versionResources.version.id === selectedVersion?.id &&
@@ -481,33 +548,6 @@ export function WorkflowsPage() {
                     },
                   ]
                 : []),
-              {
-                key: "team",
-                label: t("workflow.team"),
-                children: (
-                  <WorkflowTeam
-                    key={`team-${detail.workflow.id}`}
-                    basePath={basePath}
-                    workflowId={detail.workflow.id}
-                    bindings={detail.bindings}
-                    groupMembers={detail.groupMembers}
-                    mayManage={detail.capabilities.manageRoles}
-                    onChanged={reload}
-                  />
-                ),
-              },
-              {
-                key: "notifications",
-                label: t("notifications.title"),
-                children: (
-                  <WorkflowNotifications
-                    key={detail.workflow.id}
-                    basePath={basePath}
-                    workflowId={detail.workflow.id}
-                    mayManage={detail.capabilities.approveDossier}
-                  />
-                ),
-              },
             ]}
           />
         </>
@@ -551,38 +591,51 @@ export function WorkflowsPage() {
           }}
         />
       )}
-      {dialog !== null && (
+      {(config !== null || (creating && catalog !== null)) && (
         <WorkflowDialog
-          workflow={dialog.kind === "edit" ? dialog.workflow : null}
-          groups={state.kind === "catalog" ? state.value.createGroups : []}
-          onCancel={() => setDialog(null)}
+          key={config?.workflow.id ?? "create"}
+          workflow={config?.workflow ?? null}
+          mayEdit={config?.capabilities.editWorkflow ?? true}
+          groups={catalog?.createGroups ?? []}
+          onCancel={closeWorkflowDialog}
           onReload={() => {
-            setDialog(null);
+            closeWorkflowDialog();
             reload();
           }}
-          onSubmit={async (values) => {
-            if (dialog.kind === "edit") {
+          onSubmit={async (values, originalWorkflow) => {
+            if (originalWorkflow !== null) {
               const result = await editWorkflow(
                 basePath,
-                dialog.workflow,
+                originalWorkflow,
                 values,
               );
               if (result.kind === "ok") {
-                setDialog(null);
+                closeWorkflowDialog();
                 reload();
               }
               return result;
             }
             const result = await createWorkflow(basePath, values);
             if (result.kind === "ok") {
-              setDialog(null);
+              closeWorkflowDialog();
               navigate(
                 `/workflows/${encodeURIComponent(result.value.workflow.id)}`,
               );
             }
             return result;
           }}
-        />
+        >
+          {config && (
+            <WorkflowTeam
+              basePath={basePath}
+              workflowId={config.workflow.id}
+              bindings={config.bindings}
+              groupMembers={config.groupMembers}
+              mayManage={config.capabilities.manageRoles}
+              onChanged={reload}
+            />
+          )}
+        </WorkflowDialog>
       )}
     </div>
   );

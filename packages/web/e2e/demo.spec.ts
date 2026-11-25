@@ -49,12 +49,58 @@ test("browse all seven demo pages and follow fixture records without live reques
   const nav = page.getByRole("navigation", { name: "Primary navigation" });
   await nav.getByRole("link", { name: "Workflows", exact: true }).click();
   await page.getByRole("link", { name: "Sample review", exact: true }).click();
+  const banner = page.getByTestId("top-bar");
   await expect(
-    page.getByRole("heading", { name: "Sample review", exact: true }),
+    banner.getByRole("heading", { name: "Sample review", exact: true }),
   ).toBeVisible();
+  await expect(banner.getByText("Example team", { exact: true })).toBeVisible();
+  await expect(banner.getByRole("combobox")).toHaveCount(0);
+  const workflow = page.getByTestId("page-workflows");
   await expect(
-    page.getByRole("button", { name: "Edit workflow", exact: true }),
+    workflow.getByRole("link", { name: "All workflows", exact: true }),
   ).toHaveCount(0);
+  const version = workflow.getByRole("region", {
+    name: "Version",
+    exact: true,
+  });
+  await expect(version.getByText(/Inherited/u)).toHaveCount(0);
+  await expect(
+    version.getByText(
+      "Review a synthetic example with evidence and a human decision before release.",
+      { exact: true },
+    ),
+  ).toBeHidden();
+  for (const label of [
+    "Dossier",
+    "Plans",
+    "Proposal & initialization",
+    "Review & publication",
+  ]) {
+    await expect(
+      workflow.getByRole("tab", { name: label, exact: true }),
+    ).toBeVisible();
+  }
+  await workflow.getByRole("link", { name: "Config", exact: true }).click();
+  const config = page.getByRole("dialog", { name: "Config", exact: true });
+  await expect(
+    config.getByRole("heading", { name: "Workflow team" }),
+  ).toBeVisible();
+  await expect(config.getByText("Morgan Lee", { exact: true })).toBeVisible();
+  await expect(
+    config.getByRole("button", { name: /Save changes|Assign role/u }),
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(config).toBeHidden();
+  const versionPicker = version.getByRole("combobox", {
+    name: "Version",
+    exact: true,
+  });
+  await versionPicker.click();
+  await versionPicker.press("ArrowDown");
+  await versionPicker.press("Enter");
+  await expect(page).toHaveURL(
+    /\/demo\/workflows\/demo-workflow\/versions\/demo-version$/u,
+  );
   await nav.getByRole("link", { name: "Questionnaire", exact: true }).click();
   await expect(
     page.getByText("Release evidence", { exact: false }).first(),

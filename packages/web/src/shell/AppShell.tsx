@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { matchPath, Outlet, useLocation } from "react-router-dom";
 import { pageTitleKey } from "../app/navigation.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { usePreferences } from "../preferences/PreferencesContext.js";
@@ -24,7 +24,12 @@ export function AppShell() {
     `(max-width: ${layout.railDrawerBreakpoint - 1}px)`,
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [workflowHeadingTarget, setWorkflowHeadingTarget] =
+    useState<HTMLDivElement | null>(null);
   const collapsed = preferences.railCollapsed && !drawerMode;
+  const workflowDetail =
+    matchPath("/workflows/:workflowId", location.pathname) ??
+    matchPath("/workflows/:workflowId/versions/:versionId", location.pathname);
 
   useEffect(() => {
     setDrawerOpen(false);
@@ -65,6 +70,9 @@ export function AppShell() {
         <TopBar
           drawerMode={drawerMode}
           onOpenRail={() => setDrawerOpen(true)}
+          workflowHeadingRef={
+            workflowDetail ? setWorkflowHeadingTarget : undefined
+          }
         />
         <main id="main-content" className="app-content" tabIndex={-1}>
           {demoMode && (
@@ -77,7 +85,7 @@ export function AppShell() {
               description={t("demo.description")}
             />
           )}
-          <Outlet />
+          <Outlet context={workflowHeadingTarget} />
         </main>
       </div>
       <DocumentationDialog />

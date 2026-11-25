@@ -1,5 +1,5 @@
-import { Alert, Button, Form, Input, Modal, Select } from "antd";
-import { useState } from "react";
+import { Alert, Button, Descriptions, Form, Input, Modal, Select } from "antd";
+import { useState, type ReactNode } from "react";
 import type { Group } from "../../api/organization.js";
 import type {
   Workflow,
@@ -48,19 +48,27 @@ export type WorkflowFormValues = WorkflowFrame & { groupId: string };
 
 /** The workflow captured when opened supplies the revision, even after a conflict. */
 export function WorkflowDialog({
-  workflow,
+  workflow: currentWorkflow,
+  mayEdit,
   groups,
   onCancel,
   onSubmit,
   onReload,
+  children,
 }: {
   workflow: Workflow | null;
+  mayEdit: boolean;
   groups: Group[];
   onCancel(): void;
-  onSubmit(values: WorkflowFormValues): Promise<WriteResult<unknown>>;
+  onSubmit(
+    values: WorkflowFormValues,
+    workflow: Workflow | null,
+  ): Promise<WriteResult<unknown>>;
   onReload(): void;
+  children?: ReactNode;
 }) {
   const { t, locale } = useI18n();
+  const [workflow] = useState(currentWorkflow);
   const [form] = Form.useForm<WorkflowFormValues>();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<WriteFailure | null>(null);
@@ -71,7 +79,7 @@ export function WorkflowDialog({
     setBusy(true);
     setFailure(null);
     try {
-      const result = await onSubmit(values);
+      const result = await onSubmit(values, workflow);
       if (result.kind !== "ok") setFailure(result);
     } finally {
       setBusy(false);
@@ -81,9 +89,12 @@ export function WorkflowDialog({
   return (
     <Modal
       open
-      title={t(workflow === null ? "workflow.create" : "workflow.edit")}
+      title={t(workflow === null ? "workflow.create" : "workflow.config")}
+      className={workflow === null ? undefined : "workflow-config-dialog"}
+      width={workflow === null ? undefined : 960}
       okText={t(workflow === null ? "workflow.create" : "workflow.save")}
       cancelText={t("workflow.cancel")}
+      footer={mayEdit ? undefined : null}
       onOk={() => form.submit()}
       onCancel={onCancel}
       confirmLoading={busy}
@@ -94,67 +105,108 @@ export function WorkflowDialog({
       {failure !== null && (
         <WorkflowNotice failure={failure} onReload={onReload} />
       )}
-      <Form
-        form={form}
-        layout="vertical"
-        className="workflow-frame-form"
-        onFinish={(values) => void submit(values)}
-        initialValues={
-          workflow ?? {
-            groupId: groups[0]?.id,
-            intent: "new-skill",
-            locale: locale === "zh" ? "zh-CN" : "en",
+      {mayEdit ? (
+        <Form
+          form={form}
+          layout="vertical"
+          className="workflow-frame-form"
+          onFinish={(values) => void submit(values)}
+          initialValues={
+            workflow ?? {
+              groupId: groups[0]?.id,
+              intent: "new-skill",
+              locale: locale === "zh" ? "zh-CN" : "en",
+            }
           }
-        }
-        disabled={busy}
-        requiredMark
-      >
-        {workflow === null && (
+          disabled={busy}
+          requiredMark
+        >
+          {workflow === null && (
+            <Form.Item
+              name="groupId"
+              label={t("workflow.group")}
+              rules={required}
+            >
+              <Select
+                options={groups.map((group) => ({
+                  value: group.id,
+                  label: group.name,
+                }))}
+              />
+            </Form.Item>
+          )}
           <Form.Item
-            name="groupId"
-            label={t("workflow.group")}
+            name="name"
+            label={t("workflow.name")}
+            rules={required}
+            extra={t("workflow.nameHint")}
+          >
+            <Input maxLength={64} autoComplete="off" />
+          </Form.Item>
+          <Form.Item name="goal" label={t("workflow.goal")} rules={required}>
+            <Input.TextArea rows={3} maxLength={4000} />
+          </Form.Item>
+          <Form.Item
+            name="intent"
+            label={t("workflow.intent")}
             rules={required}
           >
             <Select
-              options={groups.map((group) => ({
-                value: group.id,
-                label: group.name,
-              }))}
+              options={[
+                { value: "new-skill", label: t("workflow.intent.new") },
+                {
+                  value: "upgrade-existing",
+                  label: t("workflow.intent.upgrade"),
+                },
+              ]}
             />
           </Form.Item>
-        )}
-        <Form.Item
-          name="name"
-          label={t("workflow.name")}
-          rules={required}
-          extra={t("workflow.nameHint")}
-        >
-          <Input maxLength={64} autoComplete="off" />
-        </Form.Item>
-        <Form.Item name="goal" label={t("workflow.goal")} rules={required}>
-          <Input.TextArea rows={3} maxLength={4000} />
-        </Form.Item>
-        <Form.Item name="intent" label={t("workflow.intent")} rules={required}>
-          <Select
-            options={[
-              { value: "new-skill", label: t("workflow.intent.new") },
+          <Form.Item
+            name="locale"
+            label={t("workflow.locale")}
+            rules={required}
+            extra={t("workflow.localeHint")}
+          >
+            <Input maxLength={100} />
+          </Form.Item>
+          {workflow !== null && (
+            <p className="muted">{t("workflow.editHint")}</p>
+          )}
+        </Form>
+      ) : (
+        currentWorkflow && (
+          <Descriptions
+            column={1}
+            items={[
               {
-                value: "upgrade-existing",
-                label: t("workflow.intent.upgrade"),
+                key: "name",
+                label: t("workflow.name"),
+                children: currentWorkflow.name,
+              },
+              {
+                key: "goal",
+                label: t("workflow.goal"),
+                children: currentWorkflow.goal,
+              },
+              {
+                key: "intent",
+                label: t("workflow.intent"),
+                children: t(
+                  currentWorkflow.intent === "new-skill"
+                    ? "workflow.intent.new"
+                    : "workflow.intent.upgrade",
+                ),
+              },
+              {
+                key: "locale",
+                label: t("workflow.locale"),
+                children: currentWorkflow.locale,
               },
             ]}
           />
-        </Form.Item>
-        <Form.Item
-          name="locale"
-          label={t("workflow.locale")}
-          rules={required}
-          extra={t("workflow.localeHint")}
-        >
-          <Input maxLength={100} />
-        </Form.Item>
-        {workflow !== null && <p className="muted">{t("workflow.editHint")}</p>}
-      </Form>
+        )
+      )}
+      {children}
     </Modal>
   );
 }

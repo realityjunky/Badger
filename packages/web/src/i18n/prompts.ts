@@ -12,7 +12,7 @@ export const promptsEn = {
   "prompts.stage.plan-proposal": "Plan and proposal",
   "prompts.stage.package": "Package",
   "prompts.stage.evaluation": "Evaluation",
-  "prompts.stage.review-publication": "Review and publication",
+  "prompts.stage.review-publication": "Review & publication",
   "prompts.audience": "Roles",
   "prompts.scenario": "Scenario",
   "prompts.dependencies": "Required context",
