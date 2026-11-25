@@ -115,6 +115,41 @@ Expand **Source evidence** using the chevron on a detail card. Choose a file
 and line range to read the cited excerpt. See **Sources → Pinned sources** for
 each current Skill version's full hash.
 
+## Initialize the approved proposal
+
+In **Proposal & initialization**, choose **Initialize project** after the
+Workflow owner approves the proposal. Initialization records the Creator state
+that binds later generation to that proposal.
+
+Once a Creator state exists, the action is **Replace Creator state**. Use it
+when you intend to initialize again from the current approved proposal, for
+example after approving a revised proposal. The confirmation identifies the
+existing state by its hash. If that state changes before the job runs, Badger
+refuses the replacement. Successful replacement withdraws the current package
+and discards its generation, authoring, evaluation, and package review progress.
+After a successful initialization, continue to **Package**.
+
+## Author the generated package
+
+1. Choose **Generate package** and confirm the generation preview. The first
+   package is a scaffold with work for the Authoring lanes. **Generation jobs**
+   shows progress and earlier generation attempts for the selected Workflow version.
+2. In **Package files**, use **Filter package files** to find files by any part
+   of their path, such as `reference/` or `SKILL.md`. The filter ignores case.
+   Clear it to see every file. Select a path to preview it.
+3. In **Authoring lanes**, choose **Request ready lanes**. Badger queues drafting
+   jobs for unfinished lanes whose dependencies are current. Under **Lane jobs**,
+   copy a queued job's Agent prompt for a connected Engineer Agent.
+4. Review and accept the submitted results you want to use. Request ready lanes
+   again as accepted results unlock dependent lanes. When all required results
+   are current, confirm **Assemble package**, then request evaluation.
+
+Open **Authoring plan** to check each lane's wave and dependencies. **Package**
+shows the latest generated package for the selected Workflow version. Each
+version can have one current package. Regeneration keeps the earlier package
+snapshot and makes the new one current. Published packages retain their exact
+bytes and appear under **Review & publication**.
+
 ## Request and share a drafting job
 
 1. Open **Questionnaire → Drafting jobs and suggestions** for the selected

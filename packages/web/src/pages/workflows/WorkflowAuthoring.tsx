@@ -135,8 +135,10 @@ export function WorkflowAuthoring({
       aria-labelledby="authoring-title"
       data-testid="workflow-authoring"
     >
+      <h3 id="authoring-title" className="sr-only">
+        {t("authoring.title")}
+      </h3>
       <div className="workflow-card-heading">
-        <h3 id="authoring-title">{t("authoring.title")}</h3>
         <Space wrap>
           {canManage && view?.current && (
             <Button

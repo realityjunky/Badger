@@ -173,6 +173,8 @@ const en = {
   "package.wave": "Wave",
   "package.dependencies": "Dependencies",
   "package.jobs": "Generation jobs",
+  "package.shownPackage": "Shown package",
+  "package.moreTabs": "More package tabs",
   "package.failed": "The package request failed. Reload and try again.",
   "package.changed":
     "The Creator state changed. Reload and review generation again.",
@@ -1858,6 +1860,8 @@ const zh: Record<MessageId, string> = {
   "package.wave": "波次",
   "package.dependencies": "依赖",
   "package.jobs": "生成任务",
+  "package.shownPackage": "当前显示的软件包",
+  "package.moreTabs": "更多软件包选项卡",
   "package.failed": "软件包请求失败。请重新加载后重试。",
   "package.changed": "创作状态已更改。请重新加载并审阅生成。",
   "package.status.queued": "生成已排队",

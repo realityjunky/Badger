@@ -1,5 +1,17 @@
 import { WorkflowAuthoring } from "./WorkflowAuthoring.js";
-import { Alert, Button, Input, Modal, Space, Spin, Table, Tag } from "antd";
+import { EllipsisOutlined } from "@ant-design/icons";
+import {
+  Alert,
+  Button,
+  Input,
+  Modal,
+  Space,
+  Spin,
+  Table,
+  Tabs,
+  Tag,
+  type TabsProps,
+} from "antd";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { PackageView } from "../../api/packages.js";
@@ -36,6 +48,7 @@ export function WorkflowPackage({
   } | null>(null);
   const [file, setFile] = useState<{ path: string; text: string } | null>(null);
   const [fileFilter, setFileFilter] = useState("");
+  const [activeTab, setActiveTab] = useState<string>();
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
   useEffect(() => {
     const controller = new AbortController();
@@ -120,6 +133,7 @@ export function WorkflowPackage({
       requestId: review.requestId,
     });
     setReview(null);
+    setActiveTab("jobs");
     setRefresh((r) => r + 1);
     onChanged();
   }
@@ -127,6 +141,146 @@ export function WorkflowPackage({
   const pending = view?.jobs.some(
     (j) => j.status === "queued" || j.status === "running",
   );
+  const tabs: NonNullable<TabsProps["items"]> = [];
+  if (saved) {
+    tabs.push(
+      {
+        key: "files",
+        label: t("package.files"),
+        children: (
+          <>
+            <label className="field">
+              {t("package.filterFiles")}
+              <Input
+                value={fileFilter}
+                allowClear
+                onChange={(event) => setFileFilter(event.target.value)}
+              />
+            </label>
+            <Table
+              size="small"
+              rowKey="path"
+              dataSource={saved.files.filter((entry) =>
+                entry.path.toLowerCase().includes(fileFilter.toLowerCase()),
+              )}
+              pagination={{ pageSize: 10, showSizeChanger: false }}
+              scroll={{ x: 720 }}
+              columns={[
+                {
+                  title: t("package.file"),
+                  dataIndex: "path",
+                  render: (value: string) => (
+                    <Button
+                      type="link"
+                      onClick={() =>
+                        void run(async () =>
+                          setFile(
+                            await questionnaireRequest(
+                              basePath,
+                              `${path}/package/file?path=${encodeURIComponent(value)}`,
+                            ),
+                          ),
+                        )
+                      }
+                    >
+                      {value}
+                    </Button>
+                  ),
+                },
+                {
+                  title: t("package.owner"),
+                  dataIndex: "owner",
+                  render: (value: "auto" | "authored" | "source") => (
+                    <Tag>{t(`package.owner.${value}`)}</Tag>
+                  ),
+                },
+                {
+                  title: "SHA-256",
+                  dataIndex: "sha256",
+                  render: (value: string) => (
+                    <code className="package-file-hash">{value}</code>
+                  ),
+                },
+              ]}
+            />
+          </>
+        ),
+      },
+      {
+        key: "lanes",
+        label: t("authoring.title"),
+        children: (
+          <WorkflowAuthoring
+            key={saved.id}
+            basePath={basePath}
+            path={path}
+            packageId={saved.id}
+            canManage={detail.capabilities.generate}
+            onChanged={onChanged}
+          />
+        ),
+      },
+      {
+        key: "plan",
+        label: t("package.authoringPlan"),
+        children: (
+          <>
+            <dl className="gate-hashes">
+              <div>
+                <dt>{t("package.authoringHash")}</dt>
+                <dd>
+                  <code>{saved.authoringPlan.authoringPlanHash}</code>
+                </dd>
+              </div>
+            </dl>
+            <Table
+              size="small"
+              rowKey="id"
+              pagination={false}
+              dataSource={saved.authoringPlan.lanes}
+              columns={[
+                { title: t("package.lane"), dataIndex: "id" },
+                {
+                  title: t("package.wave"),
+                  render: (_, lane) =>
+                    Object.entries(saved.authoringPlan.dag).find(([, lanes]) =>
+                      (lanes as string[]).includes(lane.id),
+                    )?.[0],
+                },
+                {
+                  title: t("package.dependencies"),
+                  dataIndex: "dependencies",
+                  render: (ids: string[]) => ids.join(", ") || "—",
+                },
+              ]}
+            />
+          </>
+        ),
+      },
+    );
+  }
+  if (view?.jobs.length) {
+    tabs.push({
+      key: "jobs",
+      label: t("package.jobs"),
+      children: (
+        <ul className="gate-pins" aria-live="polite">
+          {view.jobs.map((job) => (
+            <li key={job.id}>
+              <Space wrap>
+                <Tag>{t(`package.status.${job.status}`)}</Tag>
+                {job.id === saved?.generationJobId && (
+                  <Tag>{t("package.shownPackage")}</Tag>
+                )}
+                <code>{job.id}</code>
+              </Space>
+              {job.error && <p>{job.error}</p>}
+            </li>
+          ))}
+        </ul>
+      ),
+    });
+  }
   return (
     <WorkflowPanel
       title={t("package.title")}
@@ -184,134 +338,46 @@ export function WorkflowPackage({
             />
           )}
           {saved && (
-            <>
-              <dl className="gate-hashes">
-                <div>
-                  <dt>
-                    {t(
-                      saved.assembledHash
-                        ? "package.assembledHash"
-                        : "package.hash",
-                    )}
-                  </dt>
-                  <dd>
-                    <code>{saved.assembledHash ?? saved.scaffoldHash}</code>
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t("proposal.hash")}</dt>
-                  <dd>
-                    <code>{saved.proposalHash}</code>
-                  </dd>
-                </div>
-              </dl>
-              <h3>{t("package.files")}</h3>
-              <label>
-                {t("package.filterFiles")}
-                <Input
-                  value={fileFilter}
-                  allowClear
-                  onChange={(event) => setFileFilter(event.target.value)}
-                />
-              </label>
-              <Table
-                size="small"
-                rowKey="path"
-                dataSource={saved.files.filter((entry) =>
-                  entry.path.toLowerCase().includes(fileFilter.toLowerCase()),
-                )}
-                pagination={{ pageSize: 10, showSizeChanger: false }}
-                scroll={{ x: 720 }}
-                columns={[
-                  {
-                    title: t("package.file"),
-                    dataIndex: "path",
-                    render: (value: string) => (
-                      <Button
-                        type="link"
-                        onClick={() =>
-                          void run(async () =>
-                            setFile(
-                              await questionnaireRequest(
-                                basePath,
-                                `${path}/package/file?path=${encodeURIComponent(value)}`,
-                              ),
-                            ),
-                          )
-                        }
-                      >
-                        {value}
-                      </Button>
-                    ),
-                  },
-                  {
-                    title: t("package.owner"),
-                    dataIndex: "owner",
-                    render: (value: "auto" | "authored" | "source") => (
-                      <Tag>{t(`package.owner.${value}`)}</Tag>
-                    ),
-                  },
-                  {
-                    title: "SHA-256",
-                    dataIndex: "sha256",
-                    render: (value: string) => (
-                      <code className="package-file-hash">{value}</code>
-                    ),
-                  },
-                ]}
-              />
-              <WorkflowAuthoring
-                basePath={basePath}
-                path={path}
-                packageId={saved.id}
-                canManage={detail.capabilities.generate}
-                onChanged={onChanged}
-              />
-              <h3>{t("package.authoringPlan")}</h3>
-              <dl className="gate-hashes">
-                <div>
-                  <dt>{t("package.authoringHash")}</dt>
-                  <dd>
-                    <code>{saved.authoringPlan.authoringPlanHash}</code>
-                  </dd>
-                </div>
-              </dl>
-              <Table
-                size="small"
-                rowKey="id"
-                pagination={false}
-                dataSource={saved.authoringPlan.lanes}
-                columns={[
-                  { title: t("package.lane"), dataIndex: "id" },
-                  {
-                    title: t("package.wave"),
-                    render: (_, lane) =>
-                      Object.entries(saved.authoringPlan.dag).find(
-                        ([, lanes]) => (lanes as string[]).includes(lane.id),
-                      )?.[0],
-                  },
-                  {
-                    title: t("package.dependencies"),
-                    dataIndex: "dependencies",
-                    render: (ids: string[]) => ids.join(", ") || "—",
-                  },
-                ]}
-              />
-            </>
+            <dl className="gate-hashes">
+              <div>
+                <dt>
+                  {t(
+                    saved.assembledHash
+                      ? "package.assembledHash"
+                      : "package.hash",
+                  )}
+                </dt>
+                <dd>
+                  <code>{saved.assembledHash ?? saved.scaffoldHash}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>{t("proposal.hash")}</dt>
+                <dd>
+                  <code>{saved.proposalHash}</code>
+                </dd>
+              </div>
+            </dl>
           )}
-          {view.jobs.length > 0 && (
-            <>
-              <h3>{t("package.jobs")}</h3>
-              <ul className="gate-pins" aria-live="polite">
-                {view.jobs.map((job) => (
-                  <li key={job.id}>
-                    <Tag>{t(`package.status.${job.status}`)}</Tag>
-                    <code>{job.id}</code>
-                    {job.error && <p>{job.error}</p>}
-                  </li>
-                ))}
-              </ul>
-            </>
+          {tabs.length > 0 && (
+            <Tabs
+              activeKey={
+                tabs.find((tab) => tab.key === activeTab)?.key ?? tabs[0].key
+              }
+              onChange={setActiveTab}
+              animated={false}
+              locale={{ dropdownAriaLabel: t("package.moreTabs") }}
+              more={{
+                trigger: "click",
+                icon: (
+                  <>
+                    <EllipsisOutlined aria-hidden="true" />
+                    <span className="sr-only">{t("package.moreTabs")}</span>
+                  </>
+                ),
+              }}
+              items={tabs}
+            />
           )}
         </>
       )}

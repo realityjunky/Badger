@@ -492,11 +492,21 @@ for (const theme of ["light", "dark"] as const) {
         .click();
       await expect(generationDialog).toBeHidden();
       await expect(
-        packagePanel.getByText("Generation queued", { exact: true }),
+        packagePanel.getByRole("tab", { name: "Generation jobs", exact: true }),
+      ).toHaveAttribute("aria-selected", "true");
+      const generationJobs = packagePanel.getByRole("tabpanel", {
+        name: "Generation jobs",
+        exact: true,
+      });
+      await expect(
+        generationJobs.getByText("Generation queued", { exact: true }),
       ).toBeVisible();
       expect(await service.runSourceCheckJobs()).toBe(1);
       await expect(
-        packagePanel.getByText("Package generated", { exact: true }),
+        generationJobs.getByText("Package generated", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        generationJobs.getByText("Shown package", { exact: true }),
       ).toBeVisible();
       const generated = await call<PackageView>("GET", `${root}/package`);
       await expect(
@@ -504,21 +514,27 @@ for (const theme of ["light", "dark"] as const) {
           exact: true,
         }),
       ).toBeVisible();
+      const filesTab = packagePanel.getByRole("tab", {
+        name: "Package files",
+        exact: true,
+      });
+      const files = packagePanel.getByRole("tabpanel", {
+        name: "Package files",
+        exact: true,
+      });
+      await filesTab.click();
+      await expect(generationJobs).toBeHidden();
       await expect(
-        packagePanel
-          .getByText("Deterministic backbone", { exact: true })
-          .first(),
+        files.getByText("Deterministic backbone", { exact: true }).first(),
       ).toBeVisible();
       await expect(
-        packagePanel.getByText("Authored leaf", { exact: true }).first(),
+        files.getByText("Authored leaf", { exact: true }).first(),
       ).toBeVisible();
-      await expect(
-        packagePanel.getByText("skill-review", { exact: true }).first(),
-      ).toBeVisible();
-      await packagePanel
-        .getByLabel("Filter package files", { exact: true })
-        .fill("SKILL.md");
-      await packagePanel
+      const fileFilter = files.getByLabel("Filter package files", {
+        exact: true,
+      });
+      await fileFilter.fill("skill.md");
+      await files
         .getByRole("button", { name: "SKILL.md", exact: true })
         .click();
       await expect(
@@ -531,8 +547,28 @@ for (const theme of ["light", "dark"] as const) {
         .getByRole("button", { name: "Close", exact: true })
         .click();
       await packagePanel
-        .getByLabel("Filter package files", { exact: true })
-        .fill("");
+        .getByRole("tab", { name: "Authoring plan", exact: true })
+        .click();
+      const authoringPlan = packagePanel.getByRole("tabpanel", {
+        name: "Authoring plan",
+        exact: true,
+      });
+      await expect(
+        authoringPlan.getByText(
+          generated.package!.authoringPlan.authoringPlanHash,
+          { exact: true },
+        ),
+      ).toBeVisible();
+      await expect(
+        authoringPlan
+          .getByRole("cell", { name: "skill-review", exact: true })
+          .first(),
+      ).toBeVisible();
+      await filesTab.click();
+      await expect(fileFilter).toHaveValue("skill.md");
+      await packagePanel
+        .getByRole("tab", { name: "Authoring lanes", exact: true })
+        .click();
       const authoring = packagePanel.getByTestId("workflow-authoring");
       await authoring
         .getByRole("button", { name: "Request ready lanes", exact: true })
@@ -669,6 +705,20 @@ for (const theme of ["light", "dark"] as const) {
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       ).toBe(true);
+      await author.setViewportSize({ width: 390, height: 844 });
+      await packagePanel
+        .getByRole("button", { name: "More package tabs", exact: true })
+        .click();
+      await author
+        .getByRole("listbox", { name: "More package tabs", exact: true })
+        .getByRole("option", { name: "Generation jobs", exact: true })
+        .click();
+      await expect(
+        generationJobs.getByText("Shown package", { exact: true }),
+      ).toBeVisible();
+      await expect
+        .poll(() => author.evaluate(() => document.documentElement.scrollWidth))
+        .toBe(390);
       await page.goto(`${base}${root}#package`);
       await expect(
         page
