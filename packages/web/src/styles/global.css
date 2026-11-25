@@ -2276,6 +2276,15 @@ button.rail-link {
 .questionnaire-resolution-form .field {
   margin-bottom: 12px;
 }
+.text-import-option {
+  display: block;
+  max-inline-size: min(26rem, calc(100vw - 4rem));
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.questionnaire-fact-import {
+  margin-bottom: 12px;
+}
 .questionnaire-text {
   overflow-wrap: anywhere;
 }

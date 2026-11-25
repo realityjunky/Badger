@@ -14,6 +14,7 @@ import {
   type DossierAnswerChoice,
   type DossierEvidence,
   type DossierJobPin,
+  type DossierRestatementChoice,
   type WorkingDossierEdit,
   type WorkingDossierJob,
   type WorkingDossierView,
@@ -100,14 +101,18 @@ function targetFields(targets: QuestionTarget[]) {
   );
 }
 
-function reviewedDossierAnswers({
-  records,
-  questions,
-  answers,
-}: Awaited<ReturnType<typeof readQuestionnaireInputs>>): DossierAnswerChoice[] {
+function reviewedDossierRecords(
+  {
+    records,
+    questions,
+    answers,
+  }: Awaited<ReturnType<typeof readQuestionnaireInputs>>,
+  acknowledgedFacts: ReadonlySet<string>,
+) {
   const reviewedFacts =
     records.facts?.filter((fact) => fact.active && fact.current) ?? [];
   const choices = new Map<string, DossierAnswerChoice>();
+  const restatements = new Map<string, DossierRestatementChoice>();
   for (const fact of reviewedFacts) {
     const question = questions.find(({ id }) => id === fact.questionId);
     if (
@@ -118,6 +123,7 @@ function reviewedDossierAnswers({
       continue;
     const fields = targetFields(question.targets);
     if (!fields.length) continue;
+    const sources = [];
     for (const link of fact.answers) {
       const answer = answers.find(
         (item) =>
@@ -131,17 +137,30 @@ function reviewedDossierAnswers({
         current.questionRevision !== question.revision
       )
         continue;
-      choices.set(`${question.id}/${link.personId}/${link.revision}`, {
+      const source = {
         questionId: question.id,
         resolutionRevision: fact.resolutionRevision,
         personId: link.personId,
         revision: link.revision,
+      };
+      choices.set(`${question.id}/${link.personId}/${link.revision}`, {
+        ...source,
         text: current.text,
         fields,
       });
+      sources.push(source);
     }
+    if (
+      acknowledgedFacts.has(fact.id) &&
+      sources.length === fact.answers.length
+    )
+      restatements.set(fact.id, {
+        id: fact.id,
+        text: fact.statement,
+        answers: sources,
+      });
   }
-  return [...choices.values()];
+  return { reviewedAnswers: [...choices.values()], restatements };
 }
 
 export async function readWorkingDossier(
@@ -153,7 +172,14 @@ export async function readWorkingDossier(
   const basis = await workingDossierBasis(tx, version.id);
   const content = basis.revision?.content ?? emptyWorkingDossier();
   const inputs = await readQuestionnaireInputs(tx, version.id, personId, false);
-  const reviewedAnswers = reviewedDossierAnswers(inputs);
+  const handoff = createQuestionnaireHandoff({ records: inputs.records });
+  const acknowledgedFacts = new Set(
+    handoff.ledger.confirmedUserFacts.map((fact) => fact.record.id),
+  );
+  const { reviewedAnswers, restatements } = reviewedDossierRecords(
+    inputs,
+    acknowledgedFacts,
+  );
   const workflow = basis.pins.length
     ? await readWorkflow(tx, version.workflowId)
     : null;
@@ -171,30 +197,25 @@ export async function readWorkingDossier(
           dossierFieldId(scope, id, key),
         ),
     );
-    reviewedAnswers.push(
-      ...decisions.map(
-        ({
-          questionId,
-          resolutionRevision,
-          personId,
-          revision,
-          text,
-          skillId,
-          versionHash,
-        }) => ({
-          questionId,
-          resolutionRevision,
-          personId,
-          revision,
-          text,
-          fields,
-          skill: {
-            name: basis.pins.find((pin) => pin.skillId === skillId)!.name,
-            versionHash,
-          },
-        }),
-      ),
-    );
+    for (const decision of decisions) {
+      const { questionId, resolutionRevision, personId, revision } = decision;
+      const source = { questionId, resolutionRevision, personId, revision };
+      reviewedAnswers.push({
+        ...source,
+        text: decision.text,
+        fields,
+        skill: {
+          name: basis.pins.find((pin) => pin.skillId === decision.skillId)!
+            .name,
+          versionHash: decision.versionHash,
+        },
+      });
+      for (const fact of decision.restatements) {
+        const restatement = restatements.get(fact.id);
+        if (restatement) restatement.answers.push(source);
+        else restatements.set(fact.id, { ...fact, answers: [source] });
+      }
+    }
   }
   const compare = await evidenceComparison(tx, version.id);
   const changes = await compare(
@@ -214,7 +235,6 @@ export async function readWorkingDossier(
     changes,
   );
   const reviewUrl = workingDossierReviewUrl(version.workflowId, version.id);
-  const handoff = createQuestionnaireHandoff({ records: inputs.records });
   const ids = JSON.stringify({
     workflowId: version.workflowId,
     versionId: version.id,
@@ -228,6 +248,7 @@ export async function readWorkingDossier(
     pins: basis.pins,
     content,
     reviewedAnswers,
+    reviewedRestatements: [...restatements.values()],
     questions: inputs.questions.flatMap(({ id, text, state, targets }) => {
       const fields = targetFields(targets);
       return fields.length && (editable || state !== "draft")

@@ -164,6 +164,12 @@ export interface DossierAnswerChoice extends ReviewedDossierAnswer {
   skill?: { name: string; versionHash: string };
 }
 
+export interface DossierRestatementChoice {
+  id: string;
+  text: string;
+  answers: ReviewedDossierAnswer[];
+}
+
 export interface WorkingDossierView extends WorkingDossierRevision {
   available: boolean;
   legacy: boolean;
@@ -173,6 +179,7 @@ export interface WorkingDossierView extends WorkingDossierRevision {
   savedRevision?: number;
   readiness: WorkingDossierReadiness[];
   reviewedAnswers: DossierAnswerChoice[];
+  reviewedRestatements: DossierRestatementChoice[];
   questions: { id: string; text: string; state: string; fields: string[] }[];
   projection: ReturnType<typeof projectWorkingDossier>;
 }

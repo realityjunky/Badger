@@ -15,6 +15,7 @@ export interface ReviewedSkillAnswer extends ReviewedSkillAnswerReference {
   topic: string;
   questionText: string;
   text: string;
+  restatements: { id: string; text: string }[];
   kind: "clarification" | "change";
   applicabilityVersionHash: string | null;
   state: "acknowledged" | "pending-acknowledgement" | "stale";
@@ -55,7 +56,12 @@ export async function listReviewedSkillAnswers(
 ): Promise<ReviewedSkillAnswer[]> {
   if (pins.length === 0) return [];
   const result = await database.query<ReviewedSkillAnswer>(
-    `select * from (${REVIEWED_ANSWERS}
+    `select answer.*, (
+      select jsonb_agg(jsonb_build_object('id', fact.id, 'text', fact.content->>'text') order by fact.id)
+      from confirmed_facts fact join fact_answer_revisions link on link.fact_id = fact.id
+      where fact.resolution_id = answer."resolutionId" and link.person_id = answer."personId"
+        and link.revision = answer.revision
+    ) as restatements from (${REVIEWED_ANSWERS}
       and s.group_id = $1 and q.state = 'confirmed' and q.resolution_revision = r.revision
       and exists (
         select 1 from jsonb_to_recordset($2::jsonb) as pin("skillId" text, hash text)

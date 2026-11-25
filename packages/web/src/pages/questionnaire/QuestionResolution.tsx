@@ -7,6 +7,7 @@ import {
   skillVersionHref,
   type Question,
   type QuestionnaireView,
+  type Answer,
   type AnswerRevision,
   type AnswerType,
   type SkillQuestionnaireOption,
@@ -16,11 +17,21 @@ import { AttachmentLinks } from "./AnswerAttachments.js";
 import { AnswerContent } from "./AnswerContent.js";
 import { EvidenceChanges } from "../../components/EvidenceChanges.js";
 import { RecordOriginLink } from "../../components/RecordOriginLink.js";
+import { TextImportButton } from "../../components/TextImportButton.js";
 
 type Kind = "confirmed" | "followed-up" | "deferred" | "withdrawn";
+const factTextLimit = 20_000;
+
+function answerKey({
+  personId,
+  revision,
+}: Pick<Answer, "personId" | "revision">) {
+  return JSON.stringify([personId, revision]);
+}
+
 interface FactDraft {
   text: string;
-  people: string[];
+  answerKeys: string[];
 }
 interface Review {
   path: string;
@@ -85,30 +96,38 @@ export function QuestionResolution({
   const [review, setReview] = useState<Review | null>(null);
   const [disputing, setDisputing] = useState<string | null>(null);
   const [disputeReason, setDisputeReason] = useState("");
-  const submitted = view.answers
-    .filter((a) => a.questionId === question.id && a.eligibleForResolution)
-    .flatMap((a) => {
-      const latest = a.revisions.filter((r) => r.state === "submitted").at(-1);
-      return latest
-        ? [{ ...latest, personId: a.personId, personName: a.personName }]
-        : [];
-    });
+  const submitted = view.answers.filter(
+    (answer) =>
+      answer.questionId === question.id &&
+      answer.state === "submitted" &&
+      answer.eligibleForResolution,
+  );
+  const submittedByKey = new Map(
+    submitted.map((answer) => [answerKey(answer), answer]),
+  );
+  const answerOptions = submitted.map((answer) => ({
+    value: answerKey(answer),
+    label: `${answer.personName} · ${format("questionnaire.answerRevision", { number: answer.revision })}`,
+  }));
+  const importableAnswers = answerOptions
+    .filter(({ value }) => submittedByKey.get(value)!.text.trim())
+    .map(({ value: key, label }) => ({ key, label }));
   const [drafts, setDrafts] = useState<FactDraft[]>([
-    { text: "", people: submitted.map((a) => a.personId) },
+    { text: "", answerKeys: [...submittedByKey.keys()] },
   ]);
-  const answerPeople = JSON.stringify(submitted.map((a) => a.personId));
+  const submittedKeys = JSON.stringify([...submittedByKey.keys()]);
   useEffect(() => {
-    const eligible = JSON.parse(answerPeople) as string[];
+    const eligible = JSON.parse(submittedKeys) as string[];
     setDrafts((current) =>
-      current.map((d) => ({
-        ...d,
-        people:
-          !d.text && d.people.length === 0
-            ? eligible
-            : d.people.filter((personId) => eligible.includes(personId)),
-      })),
+      current.map((draft) => {
+        if (!draft.text && !draft.answerKeys.length)
+          return { ...draft, answerKeys: eligible };
+        if (draft.answerKeys.every((key) => eligible.includes(key)))
+          return draft;
+        return { ...draft, answerKeys: [] };
+      }),
     );
-  }, [answerPeople]);
+  }, [submittedKeys]);
   const facts = view.facts.filter((f) => f.questionId === question.id);
   const resolutions = view.resolutions.filter(
     (r) => r.questionId === question.id,
@@ -192,10 +211,10 @@ export function QuestionResolution({
     if (kind === "confirmed") {
       input.facts = drafts.map((d) => ({
         text: d.text,
-        answers: d.people.map((personId) => ({
-          personId,
-          revision: submitted.find((a) => a.personId === personId)!.revision,
-        })),
+        answers: d.answerKeys.map((key) => {
+          const { personId, revision } = submittedByKey.get(key)!;
+          return { personId, revision };
+        }),
       }));
       if (skillView)
         input.skillOutcome =
@@ -229,7 +248,13 @@ export function QuestionResolution({
   };
   const ready =
     kind === "confirmed"
-      ? drafts.every((d) => d.text.trim() && d.people.length) &&
+      ? drafts.every(
+          (draft) =>
+            draft.text.trim() &&
+            draft.text.length <= factTextLimit &&
+            draft.answerKeys.length &&
+            draft.answerKeys.every((key) => submittedByKey.has(key)),
+        ) &&
         (!skillView ||
           skillOutcome === "clarification" ||
           !successor ||
@@ -437,6 +462,9 @@ export function QuestionResolution({
                         number: index + 1,
                       })}
                       rows={3}
+                      status={
+                        draft.text.length > factTextLimit ? "error" : undefined
+                      }
                       value={draft.text}
                       onChange={(e) =>
                         setDrafts(
@@ -446,7 +474,38 @@ export function QuestionResolution({
                         )
                       }
                     />
+                    {draft.text.length > factTextLimit && (
+                      <span role="alert">
+                        {format("questionnaire.textTooLong", {
+                          limit: factTextLimit,
+                        })}
+                      </span>
+                    )}
                   </label>
+                  {importableAnswers.length > 0 && (
+                    <div className="questionnaire-fact-import">
+                      <TextImportButton
+                        label={t(
+                          draft.text
+                            ? "resolution.replaceWithAnswer"
+                            : "resolution.useAnswer",
+                        )}
+                        sources={importableAnswers}
+                        disabled={busy}
+                        onImport={(key) => {
+                          const answer = submittedByKey.get(key);
+                          if (answer)
+                            setDrafts((current) =>
+                              current.map((item, position) =>
+                                position === index
+                                  ? { text: answer.text, answerKeys: [key] }
+                                  : item,
+                              ),
+                            );
+                        }}
+                      />
+                    </div>
+                  )}
                   <label className="field">
                     {t("resolution.answers")}
                     <Select
@@ -455,18 +514,15 @@ export function QuestionResolution({
                       aria-label={format("resolution.factAnswers", {
                         number: index + 1,
                       })}
-                      value={draft.people}
-                      onChange={(people) =>
+                      value={draft.answerKeys}
+                      onChange={(answerKeys) =>
                         setDrafts(
                           drafts.map((d, i) =>
-                            i === index ? { ...d, people } : d,
+                            i === index ? { ...d, answerKeys } : d,
                           ),
                         )
                       }
-                      options={submitted.map((a) => ({
-                        value: a.personId,
-                        label: `${a.personName} · ${format("questionnaire.answerRevision", { number: a.revision })}`,
-                      }))}
+                      options={answerOptions}
                     />
                   </label>
                   {drafts.length > 1 && (
@@ -484,7 +540,7 @@ export function QuestionResolution({
                 onClick={() =>
                   setDrafts([
                     ...drafts,
-                    { text: "", people: submitted.map((a) => a.personId) },
+                    { text: "", answerKeys: [...submittedByKey.keys()] },
                   ])
                 }
               >
@@ -735,7 +791,7 @@ export function QuestionResolution({
               requestId: review.requestId,
             });
             setReview(null);
-            setDrafts([{ text: "", people: submitted.map((a) => a.personId) }]);
+            setDrafts([{ text: "", answerKeys: [...submittedByKey.keys()] }]);
             await reload();
           })
         }

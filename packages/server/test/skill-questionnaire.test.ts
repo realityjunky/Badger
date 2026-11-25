@@ -536,6 +536,7 @@ describe("Skill-owned Questionnaire", () => {
     for (const dossier of [originalDossier, successorDossier])
       expect(await api("GET", dossier, admin)).toMatchObject({
         reviewedAnswers: [],
+        reviewedRestatements: [],
       });
     const linkInput = {
       resolutionId: reviewedChange.resolution.id,
@@ -613,6 +614,7 @@ describe("Skill-owned Questionnaire", () => {
     });
     expect(await api("GET", originalDossier, admin)).toMatchObject({
       reviewedAnswers: [],
+      reviewedRestatements: [],
     });
     expect(await api("GET", successorDossier, admin)).toMatchObject({
       reviewedAnswers: [
@@ -620,6 +622,19 @@ describe("Skill-owned Questionnaire", () => {
           questionId: question.id,
           personId: respondentId,
           revision: resubmitted.revision,
+        },
+      ],
+      reviewedRestatements: [
+        {
+          id: currentFact.id,
+          text: change.facts[0]!.text,
+          answers: [
+            {
+              questionId: question.id,
+              personId: respondentId,
+              revision: resubmitted.revision,
+            },
+          ],
         },
       ],
     });

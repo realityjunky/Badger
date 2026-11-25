@@ -17,6 +17,7 @@ import type {
   WorkingDossierView,
 } from "@realityjunky/badger";
 import { useId, type ReactNode } from "react";
+import { TextImportButton } from "../../components/TextImportButton.js";
 import {
   dossierEvidenceKey,
   type WorkingDossierField,
@@ -63,6 +64,7 @@ const observationOnly: DossierFieldState[] = [
   "conflict",
   "not-applicable",
 ];
+const fieldValueLimit = 4000;
 
 function knownEvidence(dossier: WorkingDossierView) {
   const { fields, interfaces, findings } = dossier.content;
@@ -176,6 +178,13 @@ export function DossierEditor({
     const answerOptions = new Map(
       answers.map((answer) => [dossierAnswerId(answer), answer]),
     );
+    const restatements = (dossier.reviewedRestatements ?? []).filter(
+      (restatement) =>
+        restatement.answers.length > 0 &&
+        restatement.answers.every((answer) =>
+          answerOptions.has(dossierAnswerId(answer)),
+        ),
+    );
     const previousAnswers = new Map(
       (previous?.answers ?? []).map((answer) => [
         dossierAnswerId(answer),
@@ -193,7 +202,7 @@ export function DossierEditor({
       <Form<FieldForm>
         id={formId}
         layout="vertical"
-        disabled={busy}
+        disabled={busy || unavailable}
         initialValues={initialValues}
         onFinish={(values) => {
           const selectedAnswers = values.answers.flatMap((id) => {
@@ -234,18 +243,59 @@ export function DossierEditor({
           />
         </Form.Item>
         <Form.Item noStyle shouldUpdate>
-          {({ getFieldValue }) => {
+          {({ getFieldValue, setFieldsValue }) => {
             const state: DossierFieldState = getFieldValue("state");
             const answers: string[] = getFieldValue("answers") ?? [];
             return (
               <>
+                {restatements.length > 0 && (
+                  <Form.Item>
+                    <TextImportButton
+                      label={t(
+                        observationOnly.includes(state) ||
+                          !getFieldValue("value")
+                          ? "workingDossier.useRestatement"
+                          : "workingDossier.replaceWithRestatement",
+                      )}
+                      sources={restatements.map(({ id, text }) => ({
+                        key: id,
+                        label:
+                          text.length > 160 ? `${text.slice(0, 160)}…` : text,
+                      }))}
+                      disabled={busy || unavailable || changed}
+                      onImport={(id) => {
+                        const restatement = restatements.find(
+                          (item) => item.id === id,
+                        );
+                        if (restatement)
+                          setFieldsValue({
+                            state: "decision",
+                            value: restatement.text,
+                            answers: restatement.answers.map(dossierAnswerId),
+                          });
+                      }}
+                    />
+                  </Form.Item>
+                )}
                 <Form.Item
                   name="value"
                   hidden={observationOnly.includes(state)}
                   label={t("workingDossier.value")}
-                  rules={observationOnly.includes(state) ? [] : required}
+                  rules={
+                    observationOnly.includes(state)
+                      ? []
+                      : [
+                          ...required,
+                          {
+                            max: fieldValueLimit,
+                            message: format("questionnaire.textTooLong", {
+                              limit: fieldValueLimit,
+                            }),
+                          },
+                        ]
+                  }
                 >
-                  <Input.TextArea rows={3} maxLength={4000} />
+                  <Input.TextArea rows={3} maxLength={fieldValueLimit} />
                 </Form.Item>
                 <Form.Item
                   name="reason"
@@ -270,7 +320,20 @@ export function DossierEditor({
             );
           }}
         </Form.Item>
-        <Form.Item name="answers" label={t("workingDossier.reviewedAnswers")}>
+        <Form.Item
+          name="answers"
+          label={t("workingDossier.reviewedAnswers")}
+          rules={[
+            {
+              validator: (_, selected: string[]) =>
+                selected.every((id) => answerOptions.has(id))
+                  ? Promise.resolve()
+                  : Promise.reject(
+                      new Error(t("workingDossier.answerSelectionChanged")),
+                    ),
+            },
+          ]}
+        >
           <Select<string[]>
             mode="multiple"
             optionFilterProp="label"
