@@ -443,6 +443,19 @@ body {
   margin-inline-end: 0;
 }
 
+.dossier-topic-readiness {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.dossier-topic-readiness .working-dossier-readiness-blockers {
+  margin-block-start: 4px;
+}
+
 .ledger-readiness-topics .working-dossier-field-list {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
 }

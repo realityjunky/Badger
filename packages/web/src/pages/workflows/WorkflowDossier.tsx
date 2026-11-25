@@ -23,7 +23,6 @@ import {
   DossierReadiness,
   RemovedDossierFields,
 } from "../working-dossier/DossierReadiness.js";
-import { WorkingDossierStudy } from "../working-dossier/WorkingDossierStudy.js";
 import { useWorkingDossier } from "../working-dossier/useWorkingDossier.js";
 
 export function WorkflowDossier({
@@ -50,7 +49,7 @@ export function WorkflowDossier({
     preview: GatePreview;
     requestId: string;
     versionId?: string;
-    dossier?: WorkingDossierView;
+    dossier?: Pick<WorkingDossierView, "revision" | "pinsHash">;
   } | null>(null);
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
   const dossierPath = workingDossierPath(detail.workflow.id, detail.version.id);
@@ -149,7 +148,11 @@ export function WorkflowDossier({
     }
     setReview({
       preview,
-      ...(working ? { dossier } : { versionId: selected?.id }),
+      ...(working
+        ? {
+            dossier: { revision: dossier.revision, pinsHash: dossier.pinsHash },
+          }
+        : { versionId: selected?.id }),
       requestId: crypto.randomUUID(),
     });
   }
@@ -407,7 +410,7 @@ export function WorkflowDossier({
       )}
       <Modal
         open={review !== null}
-        width={900}
+        width={reviewDossier ? undefined : 900}
         title={t("dossier.reviewApproval")}
         okText={t("dossier.approve")}
         cancelText={t("common.cancel")}
@@ -428,17 +431,20 @@ export function WorkflowDossier({
             title={t("workingDossier.approvalChanged")}
           />
         )}
-        {reviewDossier && (
-          <WorkingDossierStudy
-            showPinnedHashes
-            dossier={{ ...reviewDossier, prompt: null }}
-            context={{
-              basePath,
-              path: dossierPath,
-              revision: reviewDossier.revision,
-              pins: reviewDossier.pins,
-            }}
-          />
+        {review?.dossier && (
+          <div className="dossier-content">
+            <p>
+              {format("workingDossier.revision", {
+                revision: review.dossier.revision,
+              })}
+            </p>
+            <div>
+              <p className="field-label">{t("dossier.hash")}</p>
+              <code className="dossier-hash">
+                {review.preview.boundHashes.dossier}
+              </code>
+            </div>
+          </div>
         )}
         {reviewed && (
           <DossierContent

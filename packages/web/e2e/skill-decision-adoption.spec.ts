@@ -416,6 +416,15 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     ).toBeNull();
 
     await confirmSources(service, engineer, workflow);
+    await admin.goto(`${base}${path}#dossier`);
+    const dossierPanel = admin.getByTestId("workflow-dossier");
+    const readiness = dossierPanel.getByRole("button", {
+      name: /^Readiness by topic/u,
+    });
+    await expect(readiness).toContainText("topics with blockers");
+    await readiness.click();
+    await expect(dossierPanel.getByText(/^Workflow · Scope —/u)).toBeVisible();
+
     const supportingFields: Record<string, DossierFieldValue> = {};
     for (const [scope, id] of [
       ["workflow", "workflow"],
@@ -430,34 +439,55 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
           value: field.label,
           reason: "Agreed for this example workflow.",
         };
-    await api(engineer, "PATCH", dossierPath, {
-      revision: updated.revision,
-      pinsHash: updated.pinsHash,
-      editId: randomUUID(),
-      fields: supportingFields,
-      nodes: {
-        render: {
-          kind: "node",
-          label: "Render report",
-          order: 0,
-          skillId: skill.skillId,
-          hash: successor.hash,
+    const ready = await api<WorkingDossierView>(
+      engineer,
+      "PATCH",
+      dossierPath,
+      {
+        revision: updated.revision,
+        pinsHash: updated.pinsHash,
+        editId: randomUUID(),
+        fields: supportingFields,
+        nodes: {
+          render: {
+            kind: "node",
+            label: "Render report",
+            order: 0,
+            skillId: skill.skillId,
+            hash: successor.hash,
+          },
         },
       },
-    });
-    const gate = `${path}/gates/dossier`;
-    const { preview } = await api<{ preview: { confirmationHash: string } }>(
-      admin,
-      "POST",
-      `${gate}/preview`,
-      {},
     );
-    await api(admin, "POST", `${gate}/commit`, {
-      confirmationHash: preview.confirmationHash,
-      requestId: randomUUID(),
+    await expect(readiness).toContainText("Ready");
+    const scope = dossierPanel.getByRole("listitem").filter({
+      has: admin.getByText("Scope", { exact: true }),
     });
+    await expect(scope.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(dossierPanel.getByText(/^Workflow · Scope —/u)).toHaveCount(0);
+    await dossierPanel
+      .getByRole("button", { name: "Review dossier approval", exact: true })
+      .click();
+    const approval = admin.getByRole("dialog", {
+      name: "Review dossier approval",
+    });
+    await expect(approval).toContainText(
+      `Working dossier revision ${ready.revision}`,
+    );
+    await expect(
+      approval.getByRole("region", { name: "Workflow diagram" }),
+    ).toHaveCount(0);
+    await expect(approval.getByRole("tab")).toHaveCount(0);
+    const reviewedHash = approval.getByText(/^[a-f0-9]{64}$/u);
+    await expect(reviewedHash).toBeVisible();
+    const hash = await reviewedHash.textContent();
+    await approval
+      .getByRole("button", { name: "Approve this version" })
+      .click();
+    await expect(approval).toBeHidden();
     const approved = await api<DossierView>(admin, "GET", `${path}/dossier`);
     expect(approved.confirmation?.invalidatedAt).toBeNull();
+    expect(approved.confirmation?.boundHashes.dossier).toBe(hash);
     await engineer.goto(`${base}/questionnaire?${query}`);
     await expert
       .getByTestId("answer-box")

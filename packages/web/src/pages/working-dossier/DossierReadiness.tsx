@@ -4,7 +4,9 @@ import { useI18n } from "../../i18n/I18nContext.js";
 
 export function DossierReadiness({ dossier }: { dossier: WorkingDossierView }) {
   const { t, format } = useI18n();
-  const blocked = dossier.readiness.filter(({ blockers }) => blockers.length);
+  const blockedCount = dossier.readiness.filter(
+    ({ blockers }) => blockers.length > 0,
+  ).length;
   return (
     <Collapse
       className="working-dossier-readiness"
@@ -14,25 +16,40 @@ export function DossierReadiness({ dossier }: { dossier: WorkingDossierView }) {
           label: (
             <Space wrap>
               <strong>{t("ledger.readiness")}</strong>
-              <Tag color={blocked.length ? "warning" : "success"}>
-                {blocked.length
+              <Tag color={blockedCount ? "warning" : "success"}>
+                {blockedCount
                   ? format("workingDossier.topicsBlocked", {
-                      count: blocked.length,
+                      count: blockedCount,
                     })
                   : t("ledger.ready")}
               </Tag>
             </Space>
           ),
-          children: blocked.map(({ topic, blockers }) => (
-            <section key={topic}>
-              <h4>{t(`questionnaire.topic.${topic}`)}</h4>
-              <ul>
-                {blockers.map(({ id, message }, index) => (
-                  <li key={`${id}/${index}`}>{message}</li>
-                ))}
-              </ul>
-            </section>
-          )),
+          children: (
+            <ul className="dossier-topic-readiness" role="list">
+              {dossier.readiness.map(({ topic, blockers }) => (
+                <li key={topic}>
+                  <div className="ledger-topic-heading">
+                    <strong>{t(`questionnaire.topic.${topic}`)}</strong>
+                    <Tag color={blockers.length ? "warning" : "success"}>
+                      {blockers.length
+                        ? format("workingDossier.itemsOpen", {
+                            count: blockers.length,
+                          })
+                        : t("ledger.ready")}
+                    </Tag>
+                  </div>
+                  {blockers.length > 0 && (
+                    <ul className="working-dossier-readiness-blockers">
+                      {blockers.map(({ id, message }, index) => (
+                        <li key={`${id}/${index}`}>{message}</li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ),
         },
       ]}
     />
