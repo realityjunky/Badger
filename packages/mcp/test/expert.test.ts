@@ -180,30 +180,53 @@ it("receives server answer instructions with the assignee's current revisions be
   const context = { workflowId, versionId };
   const question = await publishQuestion(context);
   const { client } = await connect();
-  const response = await call(client, "answer_context", {
-    ...context,
-    questionId: question.questionId,
-  });
-  const assistance = response.localFile
-    ? JSON.parse(await fs.readFile(response.localFile, "utf8"))
-    : response;
+  const target = { ...context, questionId: question.questionId };
+  async function answerContext() {
+    const response = await call(client, "answer_context", target);
+    return response.localFile
+      ? JSON.parse(await fs.readFile(response.localFile, "utf8"))
+      : response;
+  }
+  const assistance = await answerContext();
   expect(assistance).toMatchObject({
     answerRevision: 0,
     questionRevision: question.questionRevision,
+    question: {
+      text: "How is the sample stored?",
+      revisions: [
+        expect.objectContaining({ revision: question.questionRevision }),
+      ],
+    },
     answer: null,
   });
   expect(assistance.prompt).toContain("never infer their answer");
+  expect(assistance.prompt).toContain(question.questionId);
+  expect(assistance.prompt).toContain("Capture the storage requirements.");
+  expect(assistance.prompt.match(/How is the sample stored\?/gu)).toHaveLength(
+    1,
+  );
+  expect(assistance.prompt).not.toContain("finish_job");
+  const text =
+    "Draft storage exception. " +
+    "The sample stays frozen. ".repeat(320).trimEnd();
   const saved = await call(client, "save_answer", {
-    ...context,
-    questionId: question.questionId,
+    ...target,
     questionRevision: assistance.questionRevision,
     revision: assistance.answerRevision,
-    text: "The sample stays frozen.",
+    text,
   });
   expect(saved.answer).toMatchObject({
     state: "draft",
-    text: "The sample stays frozen.",
+    text,
   });
+  const current = await answerContext();
+  expect(current).toMatchObject({
+    questionRevision: assistance.questionRevision,
+    answerRevision: saved.answer.revision,
+    answer: { text },
+  });
+  expect(current.prompt).not.toContain("Draft storage exception.");
+  expect(current.prompt.length).toBeLessThan(3000);
 });
 
 it("previews and uploads an immutable Skill version from a folder against the confirmed hash", async () => {

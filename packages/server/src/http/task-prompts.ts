@@ -15,6 +15,11 @@ const ANSWER =
   /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/questionnaire\/questions\/([^/]+)\/prompt$/u;
 const STAGE =
   /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/stage-prompts\/([^/]+)$/u;
+const ANSWER_GUARDRAILS = [
+  "Use the connected Badger MCP for this exact assignment. Never execute source scripts.",
+  "Draft from the person's own knowledge. Preserve uncertainty. Save with their permission and submit only at their explicit request. Stop and report stale revisions or denied access.",
+  "Fact confirmation and acknowledgement belong to the signed-in person.",
+].join("\n\n");
 
 export function taskPromptMethods(path: string) {
   return ANSWER.test(path) || STAGE.test(path) ? "GET, HEAD" : null;
@@ -67,12 +72,15 @@ export async function handleTaskPrompts(input: AuthorizedRequest) {
             entry.questionId === target && entry.personId === input.person.id,
         ) ?? null;
       const template = await readPromptTemplate(tx, "answer-assistance");
-      const task = {
+      const reference = {
         workflowId,
         versionId,
         questionId: question.id,
         questionRevision: question.revision,
         answerRevision: answer?.revision ?? 0,
+      };
+      const task = {
+        ...reference,
         workflow: {
           name: version.name,
           goal: version.goal,
@@ -85,9 +93,17 @@ export async function handleTaskPrompts(input: AuthorizedRequest) {
         ...task,
         template,
         prompt: assemblePrompt(
-          template,
-          task,
-          "The user requests help answering this exact assigned question. Start with answer_context to refresh its revisions. Ask for their knowledge before drafting; saving or submitting requires their instruction. Do not answer on their behalf from assumptions.",
+          { ...template, guardrails: ANSWER_GUARDRAILS },
+          {
+            ...reference,
+            workflow: task.workflow,
+            question: {
+              text: question.text,
+              rationale: question.rationale,
+              answerType: question.answerType ?? { kind: "free-text" },
+            },
+          },
+          "Start with answer_context using workflowId, versionId and questionId from the task data. Use the returned question, evidence and current revisions before drafting.",
         ),
       };
     }

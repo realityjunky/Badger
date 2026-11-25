@@ -132,6 +132,10 @@ body {
   min-width: 0;
 }
 
+.working-dossier-editor {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .working-dossier-toolbar {
   display: flex;
   align-items: center;
