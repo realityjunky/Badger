@@ -80,6 +80,8 @@ export function WorkflowAuthoring({
   const { t, format, locale } = useI18n();
   const navigate = useNavigate();
   const [view, setView] = useState<View | null>(null);
+  const regenerationRequired =
+    view?.readiness.recovery.regenerationRequired === true;
   const [failure, setFailure] = useState<string | null>(null);
   const [dialogFailure, setDialogFailure] = useState<{
     message: string;
@@ -97,10 +99,14 @@ export function WorkflowAuthoring({
     (item) => item.jobId === review?.id,
   );
   const canReviewSelected =
-    canManage && view?.current && review?.status === "submitted";
+    canManage &&
+    view?.current &&
+    !regenerationRequired &&
+    review?.status === "submitted";
   const canReviseSelected =
     canManage &&
     view?.current &&
+    !regenerationRequired &&
     review?.status === "accepted" &&
     reviewLane &&
     reviewLane.status === "DONE_WITH_CONCERNS" &&
@@ -267,7 +273,11 @@ export function WorkflowAuthoring({
         <Space wrap>
           {canManage && view?.current && (
             <Button
-              disabled={busy || view.readiness.status === "assembled"}
+              disabled={
+                busy ||
+                regenerationRequired ||
+                view.readiness.status === "assembled"
+              }
               onClick={() =>
                 void run(async () => {
                   await request("/package/authoring-jobs", "POST", {
@@ -303,7 +313,11 @@ export function WorkflowAuthoring({
           <ReloadRecordsButton disabled={busy} onClick={refresh} />
         </Space>
       </div>
-      <p className="muted">{t("authoring.help")}</p>
+      {regenerationRequired ? (
+        <Alert type="info" showIcon title={t("authoring.regenerateHelp")} />
+      ) : (
+        <p className="muted">{t("authoring.help")}</p>
+      )}
       {failure && <Alert type="error" showIcon title={failure} />}
       {view && (
         <>
@@ -399,6 +413,7 @@ export function WorkflowAuthoring({
                   const canCopy =
                     canManage &&
                     view.current &&
+                    !regenerationRequired &&
                     ["submitted", "queued"].includes(job.status);
                   return (
                     <Space orientation="vertical" size="small">
@@ -457,6 +472,7 @@ export function WorkflowAuthoring({
                               {t(
                                 canManage &&
                                   view.current &&
+                                  !regenerationRequired &&
                                   job.status === "submitted"
                                   ? "authoring.inspect"
                                   : "authoring.viewReport",

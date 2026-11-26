@@ -580,6 +580,7 @@ export interface AuthoringWaveReadiness {
 export interface AuthoringRecoveryInfo {
   resumable: boolean;
   freshProcess: boolean;
+  regenerationRequired?: boolean;
   recoveryRequired?: boolean;
   reason?: string;
   revision: number;

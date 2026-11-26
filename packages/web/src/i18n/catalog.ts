@@ -121,6 +121,8 @@ const en = {
   "notifications.waitingFor.evaluation-finished": "Evaluation finished",
   "authoring.title": "Authoring lanes",
   "authoring.request": "Request ready lanes",
+  "authoring.regenerateHelp":
+    "The package generator changed. Choose Regenerate package before requesting new drafts.",
   "authoring.help":
     "Agents draft the lanes in dependency order. Review each submitted result before accepting it; assembly waits for every lane to be current.",
   "authoring.assemble": "Assemble package",
@@ -1850,6 +1852,8 @@ const zh: Record<MessageId, string> = {
   "notifications.waitingFor.evaluation-finished": "评估已完成",
   "authoring.title": "创作任务通道",
   "authoring.request": "请求可执行通道",
+  "authoring.regenerateHelp":
+    "软件包生成器已更新。请先选择“重新生成软件包”，再请求新的起草任务。",
   "authoring.help":
     "Agent 按依赖顺序起草各通道结果。请审阅并接受每项结果；所有通道均为当前状态后才能组装。",
   "authoring.assemble": "组装软件包",

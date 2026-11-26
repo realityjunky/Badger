@@ -86,6 +86,8 @@ import type {
 import type { GeneratedPackage } from "../factory/generate.js";
 
 export const AUTHORING_GENERATOR_CONTRACT_VERSION = 4 as const;
+const GENERATOR_REGENERATION_REQUIRED =
+  "The Badger package generator changed; regenerate the scaffold to continue authoring";
 export const AUTHORING_INPUT_LIMIT_BYTES = 16 * 1024 * 1024;
 const MAX_SUMMARY_BYTES = 8 * 1024;
 const MAX_ARTIFACT_BYTES = 64 * 1024;
@@ -307,12 +309,15 @@ function laneDefinition(
   return definition;
 }
 
-function authoringInputHash(plan: AuthoringPlan): string {
+function authoringInputHash(
+  plan: AuthoringPlan,
+  generatorContractVersion: AuthoringStateSummary["generatorContractVersion"] = AUTHORING_GENERATOR_CONTRACT_VERSION,
+): string {
   return sha256(
     JSON.stringify(
       stableValue({
         authoringPlanHash: plan.authoringPlanHash,
-        generatorContractVersion: AUTHORING_GENERATOR_CONTRACT_VERSION,
+        generatorContractVersion,
         planHash: plan.planHash,
         protocolHash: plan.protocolHash,
         sourceEvidenceHash: plan.sourceEvidenceHash,
@@ -1294,6 +1299,7 @@ export function validateAuthoringRecord(
   value: unknown,
   plan: AuthoringPlan,
   expectedLane?: AuthoringLaneId,
+  generatorContractVersion?: AuthoringStateSummary["generatorContractVersion"],
 ): string[] {
   const record = isRecord(value) ? value : null;
   if (!record) return ["authoring record must be an object"];
@@ -1321,7 +1327,7 @@ export function validateAuthoringRecord(
     ["authoringPlanHash", plan.authoringPlanHash],
     ["workflowProtocolHash", plan.workflowProtocolHash],
     ["sourceEvidenceHash", plan.sourceEvidenceHash],
-    ["authoringInputHash", authoringInputHash(plan)],
+    ["authoringInputHash", authoringInputHash(plan, generatorContractVersion)],
   ] as const) {
     if (record[field] !== expected)
       findings.push(`authoring record ${field} is stale`);
@@ -1512,7 +1518,7 @@ export function validateAuthoringRecord(
       ...validateAuthoringReviewInput(
         record.review,
         plan,
-        authoringInputHash(plan),
+        authoringInputHash(plan, generatorContractVersion),
       ),
     );
   }
@@ -2367,6 +2373,7 @@ async function withSessionLock<T>(
 async function readStoredRecords(
   state: CreatorState,
   plan: AuthoringPlan,
+  generatorContractVersion = state.authoring?.generatorContractVersion,
 ): Promise<{
   records: Partial<Record<AuthoringLaneId, AuthoringRecord>>;
   errors: string[];
@@ -2386,7 +2393,12 @@ async function readStoredRecords(
         continue;
       }
       const value = JSON.parse(await fs.readFile(file, "utf8")) as unknown;
-      const findings = validateAuthoringRecord(value, plan, lane);
+      const findings = validateAuthoringRecord(
+        value,
+        plan,
+        lane,
+        generatorContractVersion,
+      );
       if (findings.length) {
         errors.push(`invalid authoring record ${lane}: ${findings.join("; ")}`);
       } else {
@@ -2426,10 +2438,10 @@ function validAuthoringSummary(value: unknown): value is AuthoringStateSummary {
     typeof value.recordsPath === "string" &&
     Number.isInteger(value.revision) &&
     Number(value.revision) >= 0 &&
-    (value.generatorContractVersion === 1 ||
-      value.generatorContractVersion === 2 ||
-      value.generatorContractVersion ===
-        AUTHORING_GENERATOR_CONTRACT_VERSION) &&
+    typeof value.generatorContractVersion === "number" &&
+    Number.isInteger(value.generatorContractVersion) &&
+    value.generatorContractVersion >= 1 &&
+    value.generatorContractVersion <= AUTHORING_GENERATOR_CONTRACT_VERSION &&
     typeof value.planHash === "string" &&
     typeof value.protocolHash === "string" &&
     typeof value.workflowProtocolHash === "string" &&
@@ -2473,11 +2485,7 @@ async function readSessionSummary(
       summary.recordsPath !== recordsRoot(state)
     )
       throw new Error("Authoring session summary paths are invalid");
-    return normalizeAuthoringSummary({
-      ...summary,
-      statePath,
-      generatorContractVersion: AUTHORING_GENERATOR_CONTRACT_VERSION,
-    });
+    return normalizeAuthoringSummary({ ...summary, statePath });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
@@ -2712,7 +2720,11 @@ export async function readAuthoringSession(
   if (!summary) throw new Error(`Authoring session is missing: ${name}`);
   try {
     const plan = await readAuthoringPlan(state);
-    const stored = await readStoredRecords(state, plan);
+    const stored = await readStoredRecords(
+      state,
+      plan,
+      summary.generatorContractVersion,
+    );
     return reconcileRecordRevision(state, summary, stored.records);
   } catch {
     return summary;
@@ -2904,6 +2916,11 @@ export async function recordAuthoring(options: {
       throw new Error(
         "Generate the workflow scaffold before recording authoring",
       );
+    if (
+      current.authoring.generatorContractVersion !==
+      AUTHORING_GENERATOR_CONTRACT_VERSION
+    )
+      throw new Error(GENERATOR_REGENERATION_REQUIRED);
     const currentPlan = await readAuthoringPlan(current);
     const input = normalizeLaneOutput(
       options.record,
@@ -3669,13 +3686,11 @@ export async function authoringReadiness(
     state.authoring = authoring;
   }
   const currentInputHash = authoringInputHash(plan);
-  if (
-    authoring.generatorContractVersion !== AUTHORING_GENERATOR_CONTRACT_VERSION
-  ) {
+  const generatorChanged =
+    authoring.generatorContractVersion !== AUTHORING_GENERATOR_CONTRACT_VERSION;
+  if (generatorChanged) {
     for (const lane of authoringLaneIds()) invalidated.add(lane);
-    blockers.push(
-      "The Badger package generator changed; regenerate the scaffold to continue authoring",
-    );
+    blockers.push(GENERATOR_REGENERATION_REQUIRED);
   } else if (authoring.authoringInputHash !== currentInputHash)
     blockers.push("Authoring input evidence is stale; regenerate the scaffold");
   if (!HASH_PATTERN.test(authoring.scaffoldHash))
@@ -3803,6 +3818,7 @@ export async function authoringReadiness(
     : ["Generated scaffold contains authoring-pending content"];
   blockers.push(...pendingMarkers);
   const nextLanes = authoringLaneIds().filter((lane) => {
+    if (generatorChanged) return false;
     if (
       stored.records[lane] &&
       !invalidated.has(lane) &&
@@ -3826,23 +3842,24 @@ export async function authoringReadiness(
     blockers,
     invalidated,
   );
-  const status: AuthoringSessionStatus = recoveryError
-    ? "stale"
-    : authoring.status === "assembled" &&
-        authoring.assembledPackageHash &&
-        ready
-      ? "assembled"
-      : authoring.status === "stale" ||
-          blockers.some(
-            (blocker) =>
-              blocker.includes("stale") || blocker.includes("invalidated"),
-          )
-        ? "stale"
-        : ready
-          ? "authored"
-          : Object.keys(stored.records).length
-            ? "in-progress"
-            : "pending";
+  const status: AuthoringSessionStatus =
+    recoveryError || generatorChanged
+      ? "stale"
+      : authoring.status === "assembled" &&
+          authoring.assembledPackageHash &&
+          ready
+        ? "assembled"
+        : authoring.status === "stale" ||
+            blockers.some(
+              (blocker) =>
+                blocker.includes("stale") || blocker.includes("invalidated"),
+            )
+          ? "stale"
+          : ready
+            ? "authored"
+            : Object.keys(stored.records).length
+              ? "in-progress"
+              : "pending";
   const identity = authoringSessionIdentity(authoring);
   return {
     state: ready ? "ready" : hasContext ? "needs-context" : "blocked",
@@ -3905,7 +3922,13 @@ export async function authoringReadiness(
         invalidated,
       ),
     ],
-    recovery: recoveryInfo(state, authoring, recoveryError),
+    recovery: {
+      ...recoveryInfo(state, authoring, recoveryError),
+      ...(generatorChanged && {
+        regenerationRequired: true,
+        invalidatedLanes: [...invalidated],
+      }),
+    },
     ...((review ?? authoring.review)
       ? { review: review ?? authoring.review }
       : {}),

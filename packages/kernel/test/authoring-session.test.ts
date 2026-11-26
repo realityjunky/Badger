@@ -17,6 +17,7 @@ import {
   authoringReadiness,
   authoringSessionGateway,
   buildAuthoringHandoff,
+  hashAuthoringSessionInput,
   initializeAuthoringSession,
   recordAuthoring as persistAuthoring,
   recordAuthoringFile,
@@ -30,6 +31,7 @@ import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
 import { findSkills } from "../src/skill/find.js";
 import { evaluatePackage } from "../src/eval/run.js";
 import { reviewState } from "../src/publish/lifecycle.js";
+import { sha256, stableValue } from "../src/util.js";
 
 const recordAuthoring = (options: Parameters<typeof persistAuthoring>[0]) =>
   persistAuthoring({ ...options, confirmed: true });
@@ -1148,5 +1150,86 @@ describe("resumable authoring session", () => {
 
     expect(recovered.recovery.recoveryRequired).toBeUndefined();
     expect(recovered.identity?.sessionId).toMatch(/^[a-f0-9]{64}$/u);
+  });
+
+  it("keeps accepted version 3 reports readable while requiring regeneration", async () => {
+    const { state, plan } = await createSession();
+    const finding = {
+      severity: "minor" as const,
+      problem: "The shared brief was missing from the handoff.",
+    };
+    const record = await recordAuthoring({
+      state,
+      lane: "script",
+      record: {
+        status: "DONE_WITH_CONCERNS",
+        findings: [finding],
+      },
+    });
+    const session = state.authoring!;
+    const version3InputHash = hashAuthoringSessionInput(plan, 3);
+    const {
+      schemaVersion,
+      kind,
+      at,
+      authoredMaterialHash: _currentMaterialHash,
+      ...output
+    } = record;
+    const version3Output = {
+      ...output,
+      authoringInputHash: version3InputHash,
+      review: null,
+    };
+    const version3MaterialHash = sha256(
+      JSON.stringify(stableValue(version3Output)),
+    );
+    const summaryPath = path.join(session.sessionPath, "state.json");
+    const summary = JSON.parse(await fs.readFile(summaryPath, "utf8"));
+    summary.generatorContractVersion = 3;
+    summary.authoringInputHash = version3InputHash;
+    summary.records.script.authoringInputHash = version3InputHash;
+    summary.records.script.authoredMaterialHash = version3MaterialHash;
+    delete summary.sessionId;
+    await fs.writeFile(summaryPath, JSON.stringify(summary));
+    await fs.writeFile(
+      path.join(session.recordsPath, "script.json"),
+      JSON.stringify({
+        schemaVersion,
+        kind,
+        at,
+        ...version3Output,
+        authoredMaterialHash: version3MaterialHash,
+      }),
+    );
+
+    const gateway = authoringSessionGateway();
+    const persisted = await readState(project, state.name);
+    const readiness = await gateway.readiness(persisted);
+    expect(readiness.recoveryError).toBeUndefined();
+    expect(readiness.status).toBe("stale");
+    expect(readiness.recovery.regenerationRequired).toBe(true);
+    expect(readiness.blockers).toContainEqual(
+      expect.stringContaining("regenerate the scaffold"),
+    );
+    expect(readiness.blockers).not.toContainEqual(
+      expect.stringContaining("invalid authoring record script"),
+    );
+    expect(readiness.lanes.script).toMatchObject({
+      status: "DONE_WITH_CONCERNS",
+      executable: false,
+      findings: [finding],
+    });
+    expect(readiness.completedLanes).toEqual([]);
+    expect(readiness.nextLanes).toEqual([]);
+    expect(
+      await gateway.decide({
+        state: persisted,
+        operation: "dispatch",
+        lane: "script",
+      }),
+    ).toMatchObject({ allowed: false });
+    await expect(assemblePackage(persisted)).rejects.toThrow(
+      /regenerate the scaffold/u,
+    );
   });
 });
