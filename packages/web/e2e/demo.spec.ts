@@ -101,6 +101,14 @@ test("browse all seven demo pages and follow fixture records without live reques
   await expect(page).toHaveURL(
     /\/demo\/workflows\/demo-workflow\/versions\/demo-version$/u,
   );
+  await workflow.getByRole("tab", { name: "Package", exact: true }).click();
+  const pkg = page.getByTestId("workflow-package");
+  await expect(
+    pkg.getByText("Package assembled", { exact: true }),
+  ).toBeVisible();
+  await pkg.getByRole("tab", { name: "Package files", exact: true }).click();
+  await expect(pkg.getByText("Scaffold hash", { exact: true })).toBeVisible();
+  await expect(pkg.getByText("Proposal hash", { exact: true })).toBeVisible();
   await nav.getByRole("link", { name: "Questionnaire", exact: true }).click();
   await expect(
     page.getByText("Release evidence", { exact: false }).first(),

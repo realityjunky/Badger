@@ -394,6 +394,16 @@ const releasedAuthoring = {
     evidence: {},
     nextLanes: [],
     completedLanes: [...AUTHORING_LANE_IDS],
+    recovery: {
+      resumable: false,
+      freshProcess: false,
+      revision: 1,
+      sessionPath: ".badger/authoring/demo-workflow",
+      statePath: ".badger/authoring/demo-workflow/state.json",
+      planPath: ".badger/authoring/demo-workflow/plan.json",
+      recordsPath: ".badger/authoring/demo-workflow/records",
+      invalidatedLanes: [],
+    },
     records: Object.fromEntries(
       AUTHORING_LANE_IDS.map((id) => [id, { lane: id, revision: 1 }]),
     ),
