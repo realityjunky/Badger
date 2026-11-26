@@ -124,6 +124,7 @@ body {
 }
 
 .working-dossier-study,
+.questionnaire-ledger,
 .working-dossier-ledger,
 .working-dossier-approval,
 .working-dossier-editor {
@@ -152,10 +153,16 @@ body {
 }
 
 .working-dossier-study,
+.questionnaire-ledger,
 .working-dossier-ledger,
 .working-dossier-study-tab,
 .working-dossier-study-picker {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.questionnaire-ledger > h2,
+.questionnaire-ledger > .muted {
+  margin: 0;
 }
 
 .working-dossier-study-tab {

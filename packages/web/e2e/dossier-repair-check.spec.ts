@@ -154,6 +154,24 @@ test("an Engineer edits bounded rework and removes dependent or stale dossier re
   const saved = await api<WorkingDossierView>(page, "PATCH", path, edit);
   const ledger = `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&panel=ledger`;
   await page.goto(ledger);
+  const ledgerPanel = page.getByRole("region", {
+    name: "Ledger and readiness",
+  });
+  await expect(
+    ledgerPanel.getByRole("region", { name: "Readiness by topic" }),
+  ).toBeVisible();
+  await expect(
+    ledgerPanel.getByRole("button", { name: "Add route", exact: true }),
+  ).toBeHidden();
+  await ledgerPanel
+    .getByRole("button", { name: "Workflow structure", exact: true })
+    .click();
+  await expect(
+    ledgerPanel.getByRole("button", { name: "Add occurrence", exact: true }),
+  ).toBeVisible();
+  await expect(
+    ledgerPanel.getByRole("button", { name: "Add handoff", exact: true }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Add route", exact: true }).click();
   await select(page, "From Node", "render-notice");
   await select(page, "To Node", "prepare-dates");
@@ -164,21 +182,28 @@ test("an Engineer edits bounded rework and removes dependent or stale dossier re
   await page.getByLabel("Maximum visits", { exact: true }).fill("2");
   await page.getByRole("button", { name: "Save route", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
-  await page.goto(`${base}${root}#source-study`);
-  await page.getByRole("tab", { name: "Routes", exact: true }).click();
-  await page
+  await page.goto(`${base}${root}#dossier`);
+  const dossierPanel = page.getByTestId("workflow-dossier");
+  await dossierPanel
+    .getByRole("button", { name: "Saved workflow structure", exact: true })
+    .click();
+  await dossierPanel.getByRole("tab", { name: "Routes", exact: true }).click();
+  await dossierPanel
     .getByRole("combobox", { name: "Route", exact: true })
     .selectOption({
       label:
         "Bounded rework from render-notice to prepare-dates · Retry if a date cannot be rendered.",
     });
-  const detail = page.getByRole("region", {
+  const detail = dossierPanel.getByRole("region", {
     name: "Dossier details",
     exact: true,
   });
   await expect(detail).toContainText("Retry if a date cannot be rendered.");
   await expect(detail).toContainText("Visit limit 2");
-  await page.goto(ledger);
+  await dossierPanel
+    .getByRole("link", { name: "Edit working dossier", exact: true })
+    .click();
+  await expect(page).toHaveURL(ledger);
   await page.getByText("Workflow structure", { exact: true }).click();
   const occurrence = page.locator(".working-dossier-toolbar").filter({
     has: page.getByText("render-notice", { exact: true }),

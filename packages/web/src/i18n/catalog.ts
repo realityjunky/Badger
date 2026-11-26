@@ -539,7 +539,6 @@ const en = {
   "workingDossier.saveField": "Save field",
   "workingDossier.ask": "Ask a Question",
   "workingDossier.questionRound": "Dossier decisions",
-  "workingDossier.questionHistory": "Questions and round history",
   "workingDossier.openField": "Open dossier field",
   "workingDossier.structure": "Workflow structure",
   "workingDossier.addOccurrence": "Add occurrence",
@@ -584,7 +583,9 @@ const en = {
   "workingDossier.editUnavailable":
     "This field or pin set is unavailable for editing.",
   "workingDossier.approvalDescription":
-    "The Workflow owner reviews the working dossier revision and approves its use in planning.",
+    "The Workflow owner approves the saved working dossier for planning. Approval creates the canonical snapshot in Dossier history.",
+  "workingDossier.edit": "Edit working dossier",
+  "workingDossier.savedStructure": "Saved workflow structure",
   "workingDossier.noApprovals": "No dossier revision has been approved yet.",
   "workingDossier.approvalChanged":
     "The dossier changed since this review began. Open a new review for the latest revision.",
@@ -744,8 +745,9 @@ const en = {
   "ledger.linkedDraftsHelp":
     "These drafts become confirmed when every restatement is acknowledged. Check that the facts resolve each statement.",
   "ledger.title": "Ledger and readiness",
-  "ledger.description":
-    "Current workflow knowledge, derived from its records. Readiness lists the work still needed before composing a dossier.",
+  "ledger.legacyDescription":
+    "This version uses the earlier Questionnaire ledger to compose its Dossier.",
+  "ledger.records": "Questionnaire records",
   "ledger.questions": "Questions",
   "ledger.readiness": "Readiness by topic",
   "ledger.ready": "Ready",
@@ -2251,7 +2253,6 @@ const zh: Record<MessageId, string> = {
   "workingDossier.saveField": "保存字段",
   "workingDossier.ask": "提出问题",
   "workingDossier.questionRound": "档案决策",
-  "workingDossier.questionHistory": "问题与轮次历史",
   "workingDossier.openField": "打开档案字段",
   "workingDossier.structure": "工作流结构",
   "workingDossier.addOccurrence": "添加调用",
@@ -2294,7 +2295,9 @@ const zh: Record<MessageId, string> = {
   "workingDossier.reconcile": "以此修订为基础",
   "workingDossier.editUnavailable": "当前无法编辑此字段或固定版本集。",
   "workingDossier.approvalDescription":
-    "工作流负责人审阅工作档案修订并批准将其用于规划。",
+    "工作流负责人批准已保存的工作档案用于规划。批准时会在档案历史中生成规范快照。",
+  "workingDossier.edit": "编辑工作档案",
+  "workingDossier.savedStructure": "已保存的工作流结构",
   "workingDossier.noApprovals": "尚未有档案修订获得批准。",
   "workingDossier.approvalChanged":
     "审阅开始后档案已发生变化。请针对最新修订重新发起审阅。",
@@ -2450,8 +2453,8 @@ const zh: Record<MessageId, string> = {
   "ledger.linkedDraftsHelp":
     "所有事实转述获得认可后，这些草稿将变为已确认。请核对事实是否解决了每项陈述。",
   "ledger.title": "知识账本与就绪状态",
-  "ledger.description":
-    "根据记录自动汇总当前工作流知识，并列出编写语义档案前仍需处理的事项。",
+  "ledger.legacyDescription": "此版本使用早期的问卷知识账本来编写档案。",
+  "ledger.records": "问卷记录",
   "ledger.questions": "问卷问题",
   "ledger.readiness": "各主题就绪状态",
   "ledger.ready": "已就绪",

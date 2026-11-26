@@ -96,6 +96,7 @@ export function QuestionnairePage() {
     () => window.matchMedia("(max-width: 767px)").matches,
   );
   const roundsContentId = useId();
+  const ledgerHeadingId = useId();
   const [busy, setBusy] = useState(false);
   const [newRound, setNewRound] = useState(false);
   const [roundTitle, setRoundTitle] = useState("");
@@ -577,7 +578,14 @@ export function QuestionnairePage() {
         }
         ledger={
           workflowView && path ? (
-            <>
+            <section
+              className="questionnaire-ledger"
+              aria-labelledby={ledgerHeadingId}
+              data-testid="questionnaire-ledger"
+            >
+              <h2 className="pane-title" id={ledgerHeadingId}>
+                {t("ledger.title")}
+              </h2>
               {dossierFailure && (
                 <Alert
                   type="error"
@@ -589,7 +597,7 @@ export function QuestionnairePage() {
                 />
               )}
               {workingDossier && dossierContext && showWorkingDossier ? (
-                <div className="working-dossier-ledger">
+                <>
                   <WorkingDossierLedger
                     key={`${path}:${query.get("dossierField") ?? ""}`}
                     dossier={workingDossier}
@@ -609,18 +617,27 @@ export function QuestionnairePage() {
                     items={[
                       {
                         key: "history",
-                        label: t("workingDossier.questionHistory"),
+                        label: t("ledger.records"),
                         children: ledgerHistory,
                       },
                     ]}
                   />
-                </div>
+                </>
               ) : workingDossier ? (
-                ledgerHistory
+                <>
+                  <p className="muted">
+                    {t(
+                      workingDossier.legacy
+                        ? "ledger.legacyDescription"
+                        : "workingDossier.waitForCheck",
+                    )}
+                  </p>
+                  {ledgerHistory}
+                </>
               ) : (
                 !dossierFailure && <p role="status">{t("common.loading")}</p>
               )}
-            </>
+            </section>
           ) : null
         }
       >

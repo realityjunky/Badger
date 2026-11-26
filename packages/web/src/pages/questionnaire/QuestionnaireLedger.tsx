@@ -192,35 +192,14 @@ export function QuestionnaireLedger({
     "remainingQuestions",
   ] as const;
   return (
-    <section
-      aria-label={t(
-        showReadiness ? "ledger.title" : "workingDossier.questionHistory",
-      )}
-      data-testid="questionnaire-ledger"
-    >
-      {showReadiness && (
-        <>
-          <h2 className="pane-title">{t("ledger.title")}</h2>
-          <p className="muted">{t("ledger.description")}</p>
-        </>
-      )}
+    <section aria-label={t("ledger.records")}>
       {failure && <Alert type="error" showIcon title={failure} />}
-      {view.capabilities.compose && (
-        <Space wrap>
-          <Button onClick={() => edit("inference")}>
-            {t("ledger.addInference")}
-          </Button>
-          <Button onClick={() => edit("assumption")}>
-            {t("ledger.addAssumption")}
-          </Button>
-        </Space>
-      )}
       {ledger === null ? (
         !failure && <Spin aria-label={t("common.loading")} />
       ) : (
         <>
           {showReadiness && (
-            <>
+            <section aria-label={t("ledger.readiness")}>
               <h3>{t("ledger.readiness")}</h3>
               <p role="status">
                 {t(
@@ -276,9 +255,19 @@ export function QuestionnaireLedger({
                   ),
                 }))}
               />
-            </>
+            </section>
           )}
           <h3>{t("ledger.parts")}</h3>
+          {view.capabilities.compose && (
+            <Space wrap>
+              <Button onClick={() => edit("inference")}>
+                {t("ledger.addInference")}
+              </Button>
+              <Button onClick={() => edit("assumption")}>
+                {t("ledger.addAssumption")}
+              </Button>
+            </Space>
+          )}
           <Collapse
             defaultActiveKey={[...parts]}
             items={parts.map((part) => ({

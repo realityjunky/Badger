@@ -137,9 +137,9 @@ export const documentationEn = {
   "documentation.workflows.questionnaire":
     "The Engineer drafts and publishes rounds for assigned people to answer. Review their answers and resolve each question. The person who answered can acknowledge or dispute a Fact that restates their answer.",
   "documentation.workflows.questionnaire.readiness":
-    "Use Ledger and readiness to check accepted facts, source evidence, inferences, and open assumptions or questions. Resolve the blockers before composing the dossier.",
+    "In Ledger and readiness, open Workflow structure to edit occurrences, handoffs, and routes. Readiness by topic shows what the Dossier still needs. Questionnaire records contains the ledger and round history. Earlier versions use the five-part ledger to record inferences and assumptions.",
   "documentation.workflows.dossier":
-    "The Engineer composes the Semantic dossier from the current Ledger, including evidence, Node responsibilities, and topic summaries. Review the findings and resolve gaps in the evidence or workflow definition.",
+    "The Ledger's save actions and the Engineer MCP update the same working dossier. Open Saved workflow structure in Dossier to inspect the draft. Approval records the exact revision in Canonical JSON and record snapshot. Earlier versions compose the Semantic dossier from the Ledger.",
   "documentation.workflows.dossier.approve":
     "The Workflow owner approves the exact dossier version used to draft or compose the plan.",
   "documentation.workflows.plan":
@@ -453,9 +453,9 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.questionnaire":
     "工程师起草并发布轮次，由指定人员作答。审阅回答并解决各个问题。作答人可认可或质疑根据其回答重述的事实。",
   "documentation.workflows.questionnaire.readiness":
-    "在“台账与就绪状态”中检查已接受的事实、来源证据、推断以及未决假设或问题，然后在编写语义档案前处理所列阻碍。",
+    "在“知识账本与就绪状态”中，展开“工作流结构”可编辑调用、交接和路线。“各主题就绪状态”列出档案仍需处理的事项。“问卷记录”包含知识账本和轮次历史。早期版本使用五部分知识账本记录推断和假设。",
   "documentation.workflows.dossier":
-    "工程师根据当前台账编写语义档案，纳入证据、节点职责和主题摘要。审阅检查结果，补齐证据或工作流定义缺口。",
+    "知识账本中的保存操作和工程师 MCP 更新同一份工作档案。在“档案”中展开“已保存的工作流结构”查看草稿。批准后可在“规范 JSON 与记录快照”中查看该修订。早期版本从知识账本编写语义档案。",
   "documentation.workflows.dossier.approve":
     "工作流负责人批准用于起草或编写计划的确切档案版本。",
   "documentation.workflows.plan":

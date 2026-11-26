@@ -216,5 +216,22 @@ test("an Engineer can continue a legacy source study, inspect its evidence, and 
     `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&panel=ledger`,
   );
   const ledger = page.getByTestId("questionnaire-ledger");
+  await expect(
+    ledger.getByText(
+      "This version uses the earlier Questionnaire ledger to compose its Dossier.",
+    ),
+  ).toBeVisible();
+  await expect(
+    ledger.getByRole("region", { name: "Readiness by topic" }),
+  ).toBeVisible();
+  await expect(
+    ledger.getByRole("button", { name: "Workflow structure", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    ledger.getByRole("button", { name: "Add inference draft", exact: true }),
+  ).toBeVisible();
+  await expect(
+    ledger.getByRole("button", { name: "Add assumption", exact: true }),
+  ).toBeVisible();
   await expect(ledger.getByRole("status")).toHaveText("Ready");
 });

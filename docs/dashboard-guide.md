@@ -74,7 +74,10 @@ selected Workflow version. Paste it into an Agent connected to this deployment's
 Engineer MCP. It can use hash-matching workstation files or retrieve the pinned
 bytes. Its submitted changes appear in the diagram and in **Questionnaire →
 Ledger and readiness**. The Ledger shows missing values and open decisions by
-topic.
+topic. Open **Workflow structure** to add or edit occurrences, handoffs, and
+routes. **Questionnaire records** contains the five-part ledger and round history.
+The Ledger's save actions and the Engineer MCP's `save_working_dossier` update
+the same versioned working dossier. The MCP can save several changes together.
 
 In **Executable disclosures**, record effects that matter to the workflow's
 use of a script. If a Node uploads a report, record what it sends, its
@@ -83,7 +86,9 @@ conditions or approvals in **Questionnaire**.
 
 Use **Ask a Question** on a field to start an assigned draft. Review the submitted
 Answer through the round, then apply it to the field and select its reviewed
-revision. Use **Dossier** to preview readiness and approve the saved revision.
+revision. In **Dossier**, open **Saved workflow structure** to inspect the saved
+draft. Approval records the exact revision for planning, including its occurrences,
+handoffs, and routes in **Canonical JSON and record snapshot**.
 After an edit conflict, reload the team's save and reconcile your changes.
 Earlier workflows with Source study records use their original composition route.
 

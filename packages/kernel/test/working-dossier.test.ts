@@ -191,6 +191,10 @@ describe("working dossier readiness", () => {
 
   it("validates the same approved meaning after canonical serialization", () => {
     const pins = [report, renderer];
+    const content: WorkingDossierContent = {
+      ...reportContent,
+      routes: { deliver: { from: "write", to: "render", kind: "next" } },
+    };
     const composition = composeSemanticDossier({
       workflowVersionId: "version-1",
       workflow: {
@@ -213,15 +217,15 @@ describe("working dossier readiness", () => {
         revision: 1,
         pinsHash: "d".repeat(64),
         pins,
-        content: reportContent,
+        content,
         fields: WORKING_DOSSIER_FIELDS,
         scriptEffects: [],
       },
     });
     expect(composition.findings).toEqual([]);
-    expect(
-      validateSemanticDossier(JSON.parse(composition.canonicalJson).dossier),
-    ).toEqual([]);
+    const { dossier } = JSON.parse(composition.canonicalJson);
+    expect(validateSemanticDossier(dossier)).toEqual([]);
+    expect(dossier.workingDossier.content).toEqual(content);
   });
 
   it("keeps a bounded control transition separate from artifact handoffs", () => {

@@ -1,4 +1,4 @@
-import { Alert, Button, Modal, Select, Space, Spin, Tag } from "antd";
+import { Alert, Button, Collapse, Modal, Select, Space, Spin, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { DossierView } from "../../api/dossier.js";
@@ -30,6 +30,7 @@ import {
   RemovedDossierFields,
 } from "../working-dossier/DossierReadiness.js";
 import { useWorkingDossier } from "../working-dossier/useWorkingDossier.js";
+import { WorkingDossierStudy } from "../working-dossier/WorkingDossierStudy.js";
 
 export function WorkflowDossier({
   basePath,
@@ -263,7 +264,11 @@ export function WorkflowDossier({
             <Link
               to={`/questionnaire?workflow=${encodeURIComponent(detail.workflow.id)}&version=${encodeURIComponent(detail.version.id)}&panel=ledger`}
             >
-              {t("ledger.title")}
+              {t(
+                working && dossier.editable && dossier.available
+                  ? "workingDossier.edit"
+                  : "ledger.title",
+              )}
             </Link>
           </p>
           {working && (
@@ -299,6 +304,32 @@ export function WorkflowDossier({
                   type="info"
                   showIcon
                   title={t("workingDossier.waitForCheck")}
+                />
+              )}
+              {dossier.revision > 0 && !approvedRevision && (
+                <Collapse
+                  items={[
+                    {
+                      key: "saved-structure",
+                      label: t("workingDossier.savedStructure"),
+                      children: (
+                        <WorkingDossierStudy
+                          dossier={{
+                            content: dossier.content,
+                            pins: dossier.pins,
+                            projection: dossier.projection,
+                            revision: dossier.revision,
+                          }}
+                          context={{
+                            basePath,
+                            path: dossierPath,
+                            revision: dossier.revision,
+                            pins: dossier.pins,
+                          }}
+                        />
+                      ),
+                    },
+                  ]}
                 />
               )}
               <DossierReadiness dossier={dossier} />

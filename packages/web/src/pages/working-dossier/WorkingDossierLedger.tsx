@@ -108,37 +108,11 @@ export function WorkingDossierLedger({
       aria-label={t("workingDossier.title")}
     >
       <div className="working-dossier-toolbar">
-        <div>
-          <h2>{t("workingDossier.title")}</h2>
-          <span className="muted" role="status">
+        <h3>
+          <span role="status">
             {format("workingDossier.revision", { revision: dossier.revision })}
           </span>
-        </div>
-        {canEdit && (
-          <Space wrap>
-            <Button
-              onClick={() => setEdit({ kind: "node", id: crypto.randomUUID() })}
-            >
-              {t("workingDossier.addOccurrence")}
-            </Button>
-            <Button
-              disabled={!nodes.length}
-              onClick={() =>
-                setEdit({ kind: "interface", id: crypto.randomUUID() })
-              }
-            >
-              {t("workingDossier.addHandoff")}
-            </Button>
-            <Button
-              disabled={!nodes.some(([, node]) => node.kind === "node")}
-              onClick={() =>
-                setEdit({ kind: "route", id: crypto.randomUUID() })
-              }
-            >
-              {t("workingDossier.addRoute")}
-            </Button>
-          </Space>
-        )}
+        </h3>
       </div>
       {!dossier.available && (
         <Alert type="info" showIcon title={t("workingDossier.waitForCheck")} />
@@ -211,6 +185,123 @@ export function WorkingDossierLedger({
           }
         />
       )}
+      {canEdit && (
+        <Collapse
+          items={[
+            {
+              key: "structure",
+              label: t("workingDossier.structure"),
+              children: (
+                <div className="working-dossier-field-list">
+                  <Space wrap>
+                    <Button
+                      onClick={() =>
+                        setEdit({ kind: "node", id: crypto.randomUUID() })
+                      }
+                    >
+                      {t("workingDossier.addOccurrence")}
+                    </Button>
+                    <Button
+                      disabled={!nodes.length}
+                      onClick={() =>
+                        setEdit({ kind: "interface", id: crypto.randomUUID() })
+                      }
+                    >
+                      {t("workingDossier.addHandoff")}
+                    </Button>
+                    <Button
+                      disabled={!nodes.some(([, node]) => node.kind === "node")}
+                      onClick={() =>
+                        setEdit({ kind: "route", id: crypto.randomUUID() })
+                      }
+                    >
+                      {t("workingDossier.addRoute")}
+                    </Button>
+                  </Space>
+                  {nodes.map(([id, node]) => (
+                    <div className="working-dossier-toolbar" key={`node/${id}`}>
+                      <span>{node.label}</span>
+                      <Space wrap>
+                        <Button
+                          onClick={() => setEdit({ kind: "node", id, node })}
+                        >
+                          {t("workingDossier.editOccurrence")}
+                        </Button>
+                        {removeButton(
+                          "node",
+                          id,
+                          t("workingDossier.removeOccurrence"),
+                        )}
+                      </Space>
+                    </div>
+                  ))}
+                  {interfaces.map(([id, edge]) => {
+                    const field = fields.find(
+                      (field) =>
+                        field.scope === "interface" && field.owner === id,
+                    );
+                    return (
+                      <div
+                        className="working-dossier-toolbar"
+                        key={`interface/${id}`}
+                      >
+                        <span>
+                          {handoffLabel(
+                            dossier.content,
+                            edge.producer,
+                            edge.consumer,
+                          )}
+                        </span>
+                        <Space wrap>
+                          <Button
+                            onClick={() =>
+                              setEdit({ kind: "interface", id, edge })
+                            }
+                          >
+                            {t("workingDossier.editHandoff")}
+                          </Button>
+                          {field && (
+                            <Button onClick={() => onAsk(field, id)}>
+                              {t("workingDossier.ask")}
+                            </Button>
+                          )}
+                          {removeButton(
+                            "interface",
+                            id,
+                            t("workingDossier.removeHandoff"),
+                          )}
+                        </Space>
+                      </div>
+                    );
+                  })}
+                  {routes.map(([id, route]) => (
+                    <div
+                      className="working-dossier-toolbar"
+                      key={`route/${id}`}
+                    >
+                      <span>
+                        {routeLabel(dossier.content, route, t, format)}
+                      </span>
+                      <Space wrap>
+                        <Button
+                          onClick={() => setEdit({ kind: "route", id, route })}
+                        >
+                          {t("workingDossier.editRoute")}
+                        </Button>
+                        {removeButton(
+                          "route",
+                          id,
+                          t("workingDossier.removeRoute"),
+                        )}
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              ),
+            },
+          ]}
+        />
+      )}
       <div className="working-dossier-field-picker">
         <label className="field-label" htmlFor={selectorId}>
           {t("workingDossier.field")}
@@ -278,104 +369,6 @@ export function WorkingDossierLedger({
           }))}
         />
       </section>
-      {canEdit &&
-        (nodes.length > 0 || interfaces.length > 0 || routes.length > 0) && (
-          <Collapse
-            items={[
-              {
-                key: "structure",
-                label: t("workingDossier.structure"),
-                children: (
-                  <div className="working-dossier-field-list">
-                    {nodes.map(([id, node]) => (
-                      <div
-                        className="working-dossier-toolbar"
-                        key={`node/${id}`}
-                      >
-                        <span>{node.label}</span>
-                        <Space wrap>
-                          <Button
-                            onClick={() => setEdit({ kind: "node", id, node })}
-                          >
-                            {t("workingDossier.editOccurrence")}
-                          </Button>
-                          {removeButton(
-                            "node",
-                            id,
-                            t("workingDossier.removeOccurrence"),
-                          )}
-                        </Space>
-                      </div>
-                    ))}
-                    {interfaces.map(([id, edge]) => {
-                      const field = fields.find(
-                        (field) =>
-                          field.scope === "interface" && field.owner === id,
-                      );
-                      return (
-                        <div
-                          className="working-dossier-toolbar"
-                          key={`interface/${id}`}
-                        >
-                          <span>
-                            {handoffLabel(
-                              dossier.content,
-                              edge.producer,
-                              edge.consumer,
-                            )}
-                          </span>
-                          <Space wrap>
-                            <Button
-                              onClick={() =>
-                                setEdit({ kind: "interface", id, edge })
-                              }
-                            >
-                              {t("workingDossier.editHandoff")}
-                            </Button>
-                            {field && (
-                              <Button onClick={() => onAsk(field, id)}>
-                                {t("workingDossier.ask")}
-                              </Button>
-                            )}
-                            {removeButton(
-                              "interface",
-                              id,
-                              t("workingDossier.removeHandoff"),
-                            )}
-                          </Space>
-                        </div>
-                      );
-                    })}
-                    {routes.map(([id, route]) => (
-                      <div
-                        className="working-dossier-toolbar"
-                        key={`route/${id}`}
-                      >
-                        <span>
-                          {routeLabel(dossier.content, route, t, format)}
-                        </span>
-                        <Space wrap>
-                          <Button
-                            onClick={() =>
-                              setEdit({ kind: "route", id, route })
-                            }
-                          >
-                            {t("workingDossier.editRoute")}
-                          </Button>
-                          {removeButton(
-                            "route",
-                            id,
-                            t("workingDossier.removeRoute"),
-                          )}
-                        </Space>
-                      </div>
-                    ))}
-                  </div>
-                ),
-              },
-            ]}
-          />
-        )}
       {edit && (
         <DossierEditor
           dossier={dossier}

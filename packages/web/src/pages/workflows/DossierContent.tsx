@@ -58,6 +58,9 @@ export function DossierContent({
         {canonicalJson !== null && (
           <details>
             <summary>{t("dossier.canonical")}</summary>
+            <p className="muted">
+              {format("workingDossier.revision", { revision })}
+            </p>
             <pre className="dossier-json">{canonicalJson}</pre>
           </details>
         )}
