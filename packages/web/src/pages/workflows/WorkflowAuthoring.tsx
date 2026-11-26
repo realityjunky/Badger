@@ -12,6 +12,7 @@ import {
 } from "../../api/questionnaire.js";
 import { AgentPromptButton } from "../../components/AgentPromptButton.js";
 import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
+import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 type LaneJob = AuthoringDraftingJob & {
@@ -311,6 +312,7 @@ export function WorkflowAuthoring({
             </Button>
           )}
           <ReloadRecordsButton disabled={busy} onClick={refresh} />
+          <StageReviewGuidance stage="package" />
         </Space>
       </div>
       {regenerationRequired ? (

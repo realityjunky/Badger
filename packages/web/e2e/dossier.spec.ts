@@ -518,11 +518,21 @@ for (const theme of ["light", "dark"] as const) {
         generationJobs.getByText("Shown package", { exact: true }),
       ).toBeVisible();
       const generated = await call<PackageView>("GET", `${root}/package`);
+      const tabBar = packagePanel.locator(".ant-tabs-nav");
       await expect(
-        packagePanel.getByText(generated.package!.scaffoldHash, {
+        tabBar.getByRole("button", { name: "Regenerate package" }),
+      ).toBeVisible();
+      await expect(
+        tabBar.getByRole("button", { name: "Reload records", exact: true }),
+      ).toBeVisible();
+      await expect(
+        packagePanel.getByRole("heading", { name: "Package", exact: true }),
+      ).toHaveClass("sr-only");
+      await expect(
+        generationJobs.getByText(generated.package!.scaffoldHash, {
           exact: true,
         }),
-      ).toBeVisible();
+      ).toHaveCount(0);
       const filesTab = packagePanel.getByRole("tab", {
         name: "Package files",
         exact: true,
@@ -533,6 +543,12 @@ for (const theme of ["light", "dark"] as const) {
       });
       await filesTab.click();
       await expect(generationJobs).toBeHidden();
+      await expect(
+        files.getByText(generated.package!.scaffoldHash, { exact: true }),
+      ).toBeVisible();
+      await expect(
+        files.getByText(generated.package!.proposalHash, { exact: true }),
+      ).toBeVisible();
       await expect(
         files.getByText("Deterministic backbone", { exact: true }).first(),
       ).toBeVisible();

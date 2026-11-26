@@ -4,6 +4,7 @@ import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
 export function WorkflowPanel({
   title,
   hideHeading = false,
+  showGuidance = true,
   actions,
   children,
   className,
@@ -12,6 +13,7 @@ export function WorkflowPanel({
 }: ComponentProps<"section"> & {
   title: string;
   hideHeading?: boolean;
+  showGuidance?: boolean;
   actions?: ReactNode;
 }) {
   const contentId = useId();
@@ -37,7 +39,7 @@ export function WorkflowPanel({
           {actions}
         </div>
       )}
-      {id && (
+      {id && showGuidance && (
         <StageReviewGuidance
           stage={id === "plan" || id === "proposal" ? "plan-proposal" : id}
         />

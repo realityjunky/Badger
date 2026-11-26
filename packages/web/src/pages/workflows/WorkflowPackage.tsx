@@ -141,6 +141,26 @@ export function WorkflowPackage({
   const pending = view?.jobs.some(
     (j) => j.status === "queued" || j.status === "running",
   );
+  const packageActions = (
+    <Space size="small">
+      {view?.canGenerate && detail.capabilities.generate && (
+        <Button
+          type="primary"
+          disabled={busy || pending}
+          onClick={() => void run(preview)}
+        >
+          {t(saved ? "package.regenerate" : "package.generate")}
+        </Button>
+      )}
+      <ReloadRecordsButton
+        disabled={busy}
+        onClick={() => {
+          setFailure(null);
+          setRefresh((r) => r + 1);
+        }}
+      />
+    </Space>
+  );
   const tabs: NonNullable<TabsProps["items"]> = [];
   if (saved) {
     tabs.push(
@@ -225,6 +245,35 @@ export function WorkflowPackage({
       label: t("package.files"),
       children: (
         <>
+          <dl className="gate-hashes">
+            <div>
+              <dt>{t("package.hash")}</dt>
+              <dd>
+                <code>{saved.scaffoldHash}</code>
+              </dd>
+            </div>
+            <div>
+              <dt>{t("proposal.hash")}</dt>
+              <dd>
+                <code>{saved.proposalHash}</code>
+              </dd>
+            </div>
+            {saved.assembledHash && (
+              <div>
+                <dt>{t("package.assembledHash")}</dt>
+                <dd>
+                  <code>{saved.assembledHash}</code>
+                </dd>
+              </div>
+            )}
+          </dl>
+          {saved.assembledHash && (
+            <Link
+              to={`/evaluations?workflow=${encodeURIComponent(detail.workflow.id)}&version=${encodeURIComponent(detail.version.id)}`}
+            >
+              {t("page.evaluations.title")}
+            </Link>
+          )}
           <label className="field">
             {t("package.filterFiles")}
             <Input
@@ -286,39 +335,14 @@ export function WorkflowPackage({
   return (
     <WorkflowPanel
       title={t("package.title")}
+      hideHeading
+      showGuidance={false}
       ref={section}
       id="package"
       data-testid="workflow-package"
       aria-labelledby="package-title"
-      actions={
-        <Space wrap>
-          {saved?.assembledHash && (
-            <Link
-              to={`/evaluations?workflow=${encodeURIComponent(detail.workflow.id)}&version=${encodeURIComponent(detail.version.id)}`}
-            >
-              {t("page.evaluations.title")}
-            </Link>
-          )}
-          {view?.canGenerate && detail.capabilities.generate && (
-            <Button
-              type="primary"
-              disabled={busy || pending}
-              onClick={() => void run(preview)}
-            >
-              {t(saved ? "package.regenerate" : "package.generate")}
-            </Button>
-          )}
-          <ReloadRecordsButton
-            disabled={busy}
-            onClick={() => {
-              setFailure(null);
-              setRefresh((r) => r + 1);
-            }}
-          />
-        </Space>
-      }
+      actions={tabs.length === 0 ? packageActions : undefined}
     >
-      <p className="muted">{t("package.description")}</p>
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view ? (
         <Spin />
@@ -339,28 +363,6 @@ export function WorkflowPackage({
               description={saved.invalidationReason}
             />
           )}
-          {saved && (
-            <dl className="gate-hashes">
-              <div>
-                <dt>
-                  {t(
-                    saved.assembledHash
-                      ? "package.assembledHash"
-                      : "package.hash",
-                  )}
-                </dt>
-                <dd>
-                  <code>{saved.assembledHash ?? saved.scaffoldHash}</code>
-                </dd>
-              </div>
-              <div>
-                <dt>{t("proposal.hash")}</dt>
-                <dd>
-                  <code>{saved.proposalHash}</code>
-                </dd>
-              </div>
-            </dl>
-          )}
           {tabs.length > 0 && (
             <Tabs
               activeKey={
@@ -368,6 +370,7 @@ export function WorkflowPackage({
               }
               onChange={setActiveTab}
               animated={false}
+              tabBarExtraContent={packageActions}
               locale={{ dropdownAriaLabel: t("package.moreTabs") }}
               more={{
                 trigger: "click",
