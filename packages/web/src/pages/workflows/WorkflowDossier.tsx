@@ -7,7 +7,10 @@ import {
   questionnaireRequest,
 } from "../../api/questionnaire.js";
 import { workingDossierPath } from "../../api/working-dossier.js";
-import type { WorkingDossierView } from "@realityjunky/badger";
+import type {
+  ApprovedWorkingDossier,
+  WorkingDossierView,
+} from "@realityjunky/badger";
 import type {
   GatePreview,
   WorkflowVersionDetail,
@@ -18,6 +21,7 @@ import { useInbox } from "../../inbox/InboxContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { DossierComposer } from "./DossierComposer.js";
 import { DossierContent } from "./DossierContent.js";
+import { WorkingDossierApproval } from "./WorkingDossierApproval.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
 import { selectedWorkflowTab } from "./WorkflowTabs.js";
@@ -51,7 +55,8 @@ export function WorkflowDossier({
     preview: GatePreview;
     requestId: string;
     versionId?: string;
-    dossier?: Pick<WorkingDossierView, "revision" | "pinsHash">;
+    dossier?: WorkingDossierView;
+    previous?: ApprovedWorkingDossier;
   } | null>(null);
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
   const dossierPath = workingDossierPath(detail.workflow.id, detail.version.id);
@@ -152,7 +157,10 @@ export function WorkflowDossier({
       preview,
       ...(working
         ? {
-            dossier: { revision: dossier.revision, pinsHash: dossier.pinsHash },
+            dossier,
+            previous: view?.versions.find(
+              ({ hash }) => hash === view.confirmation?.boundHashes.dossier,
+            )?.snapshot.dossier.workingDossier,
           }
         : { versionId: selected?.id }),
       requestId: crypto.randomUUID(),
@@ -407,7 +415,8 @@ export function WorkflowDossier({
       )}
       <Modal
         open={review !== null}
-        width={reviewDossier ? undefined : 900}
+        width={900}
+        className={reviewDossier ? "dossier-review-dialog" : undefined}
         title={t("dossier.reviewApproval")}
         okText={t("dossier.approve")}
         cancelText={t("common.cancel")}
@@ -435,6 +444,12 @@ export function WorkflowDossier({
                 revision: review.dossier.revision,
               })}
             </p>
+            <WorkingDossierApproval
+              dossier={review.dossier}
+              previous={review.previous}
+              basePath={basePath}
+              path={dossierPath}
+            />
             <div>
               <p className="field-label">{t("dossier.hash")}</p>
               <code className="dossier-hash">

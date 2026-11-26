@@ -600,6 +600,16 @@ const en = {
   "dossier.approve": "Approve this version",
   "dossier.approvalHelp":
     "Approve the dossier and the exact record revisions shown. This completes the dossier stage and opens plan and proposal.",
+  "dossier.change.sinceApproval": "Changes since approved revision {revision}",
+  "dossier.change.firstApproval": "Proposed dossier for first approval",
+  "dossier.change.empty":
+    "The working dossier records match the last approval.",
+  "dossier.change.group": "{label} ({count})",
+  "dossier.change.added": "Added",
+  "dossier.change.modified": "Changed",
+  "dossier.change.removed": "Removed",
+  "dossier.change.before": "Previously approved",
+  "dossier.change.after": "Proposed",
   "dossier.approved": "Dossier approved",
   "dossier.awaiting": "Awaiting Workflow owner approval",
   "dossier.supersededHelp":
@@ -2298,6 +2308,15 @@ const zh: Record<MessageId, string> = {
   "dossier.edit": "继续编辑",
   "dossier.reviewApproval": "审核语义档案批准",
   "dossier.approve": "批准此版本",
+  "dossier.change.sinceApproval": "与上次批准的修订 {revision} 相比的变更",
+  "dossier.change.firstApproval": "待首次批准的工作档案",
+  "dossier.change.empty": "工作档案记录与上次批准的内容一致。",
+  "dossier.change.group": "{label}（{count}）",
+  "dossier.change.added": "新增",
+  "dossier.change.modified": "已修改",
+  "dossier.change.removed": "已移除",
+  "dossier.change.before": "上次批准",
+  "dossier.change.after": "本次提议",
   "dossier.approvalHelp":
     "批准所示档案及其绑定的记录修订。这将完成档案阶段，并开启计划与提案阶段。",
   "dossier.approved": "语义档案已批准",

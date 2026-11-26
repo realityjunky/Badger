@@ -65,7 +65,10 @@ export function DossierFieldValue({
   questions = [],
   collapseEvidence = false,
 }: {
-  field: WorkingDossierField;
+  field: Pick<
+    WorkingDossierField,
+    "content" | "required" | "blocker" | "evidenceChanges"
+  >;
   context: EvidenceContext;
   questions?: WorkingDossierView["questions"];
   collapseEvidence?: boolean;

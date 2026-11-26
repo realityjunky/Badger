@@ -2520,6 +2520,29 @@ button.rail-link {
   display: block;
   overflow-wrap: anywhere;
 }
+.dossier-review-dialog .ant-modal-body {
+  max-height: min(70dvh, 48rem);
+  overflow-y: auto;
+}
+.dossier-review-records {
+  display: grid;
+  gap: 8px;
+}
+.dossier-review-record-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.dossier-review-values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  gap: 12px;
+}
+.dossier-review-values > div {
+  min-width: 0;
+}
 .dossier-json {
   max-height: 360px;
   overflow: auto;
