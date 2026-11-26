@@ -103,6 +103,19 @@ test("Documentation is in the sidebar, opens the current section, and links to e
       await expect(
         guide.getByText(/Expand Source evidence with the chevron/u),
       ).toBeVisible();
+      for (const [topic, instruction] of [
+        ["Plans", "Request plan draft"],
+        ["Workflow approvals and checks", "approvalRequirements"],
+        ["Proposal & initialization", "Replace Creator state"],
+        ["Package", "Regenerate package"],
+        ["Lane reports and follow-up work", "Request revised draft"],
+        ["Evaluation", "results for any deferred lane concerns"],
+      ]) {
+        await sections.getByRole("link", { name: topic, exact: true }).click();
+        await expect(
+          guide.getByText(instruction, { exact: false }),
+        ).toBeVisible();
+      }
     }
     if (name === "Skills") {
       await sections
@@ -332,6 +345,13 @@ for (const theme of ["light", "dark"] as const) {
         exact: true,
       }),
     ).toBeVisible();
+    if (chinese) {
+      const sections = guide.getByRole("navigation", { name: "指南章节" });
+      await sections.getByRole("link", { name: "工作流", exact: true }).click();
+      await sections.getByRole("link", { name: "通道报告与后续工作" }).click();
+      await expect(guide.getByText(/DONE_WITH_CONCERNS 表示/u)).toBeVisible();
+      await expect(guide.getByText(/选择“请求修改稿”/u)).toBeVisible();
+    }
     await guide
       .getByRole("navigation", {
         name: chinese ? "指南章节" : "Guide sections",

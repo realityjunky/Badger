@@ -143,17 +143,47 @@ export const documentationEn = {
   "documentation.workflows.dossier.approve":
     "The Workflow owner approves the exact dossier version used to draft or compose the plan.",
   "documentation.workflows.plan":
-    "The Engineer saves a FactoryPlan based on the approved dossier. Review the plan's findings, then have the Workflow owner approve the current plan and the exact Proposal produced from it.",
-  "documentation.workflows.plan.initialize":
-    "After proposal approval, the Engineer uses Initialize project and confirms the preview to create the project used for package generation.",
+    "In Plans, choose Request plan draft, then use Copy Agent prompt on the queued draft. When the Agent finishes, choose Review plan suggestion. Resolve the plan findings and confirm Accept as a plan version. Use Edit plan to compose a version directly.",
+  "documentation.workflows.plan.drafts":
+    "Use the draft ID to match an Agent session to its row. Delete draft is available for an unclaimed, unaccepted draft. A draft with an active claim becomes eligible after the Agent finishes or releases it.",
+  "documentation.workflows.plan.approve":
+    "The Workflow owner selects the saved version and uses Review plan approval to approve its exact plan and dossier hashes. Approve the derived proposal separately in Proposal & initialization.",
+  "documentation.workflows.checks.title": "Workflow approvals and checks",
+  "documentation.workflows.checks.approvals":
+    "Use a Decision Node for a signed-in person's approval of specific artifact versions. In the plan, a downstream Node can declare approvalRequirements for the required decision, choice, and artifacts. WorkflowRuntime checks the approval before entering the Node and again during inspection and submission. If the file changes or its producer reruns, obtain a fresh approval.",
+  "documentation.workflows.checks.verification":
+    "An automated guardrail can pin a trusted verifier by its executable hash and public key. WorkflowRuntime verifies the signed result against the current action and artifact scope. Declare the check on an earlier Node when a later step needs the result before it can run.",
+  "documentation.workflows.checks.hook":
+    "When called, the generated hook checks the current WorkflowRuntime action. An Agent host needs a supported adapter to register it for a host event.",
+  "documentation.workflows.proposal.initialize":
+    "In Proposal & initialization, the Workflow owner approves the proposal derived from the current approved Plan. The Engineer then chooses Initialize project and confirms the preview. Follow Initialization jobs, then open Package when the project is ready.",
+  "documentation.workflows.proposal.replace":
+    "Use Replace Creator state after approval of a revised proposal when a Creator state already exists. Confirm the existing state hash. Replacement withdraws the current package and its generation, authoring, evaluation, and review progress.",
   "documentation.workflows.package":
-    "The Engineer previews and confirms generation, then requests the Authoring lanes that the kernel reports as ready. Review each lane's submitted claims and content and confirm acceptance or rejection.",
+    "Choose Generate package and confirm the preview for the current proposal and Creator state. Generation jobs shows progress and earlier attempts. Authoring plan lists the lanes, waves, and dependencies.",
+  "documentation.workflows.package.files":
+    "Use Filter package files to find a path such as SKILL.md or reference/. Select the path to preview its contents. The file list shows each file's owner and hash.",
+  "documentation.workflows.package.dispatch":
+    "In Authoring lanes, choose Request ready lanes, then Copy Agent prompt for each job you want to dispatch. The handoff includes the lane's brief, the shared authoring brief, and the package inputs bound to that job.",
+  "documentation.workflows.package.regenerate":
+    "When Package reports a generator update, you can still read the accepted reports. Choose Regenerate package before requesting new drafts. A new scaffold supersedes the authoring, evaluation, and review work for the previous scaffold.",
   "documentation.workflows.package.assemble":
-    "Once the required lane results are accepted and current, preview and confirm assembly of the package. Use its exact hash for evaluation.",
+    "Once the required authoring evidence is current, choose Assemble package and confirm the preview. Use the assembled package's exact hash for Evaluation.",
+  "documentation.workflows.findings.title": "Lane reports and follow-up work",
+  "documentation.workflows.findings.report":
+    "Choose Review result on a submitted job. Read the summary, claims, findings, evidence, and any next action before confirming a decision. After acceptance, use View report. Expand the lane to see reports from Earlier attempts.",
+  "documentation.workflows.findings.concerns":
+    "DONE_WITH_CONCERNS means the Agent recorded outstanding findings. Accepting the report saves those findings. The lane can proceed if its authoring evidence is complete and every concern is minor and assigned to a named Evaluation check. Each deferred check must pass on the assembled package before package review.",
+  "documentation.workflows.findings.revise":
+    "After fixing a lane-local concern, open its accepted report and choose Request revised draft. The new job receives the current inputs and earlier findings. If a repair job is already queued, use Copy Agent prompt on that job.",
+  "documentation.workflows.findings.followUp":
+    "Use Follow-up work to open a question or a finding in Sources, Dossier, Plans, or Proposal & initialization. For a Plan repair, Confirm and open plan draft creates a draft from the approved Plan with the finding attached. Review and approve revised inputs before regenerating.",
+  "documentation.workflows.findings.badger":
+    "A Badger issue names the handoff, generator, WorkflowRuntime, or Agent host area that needs a fix. Package records the issue and waits for the fix. Regenerate when the fix changes the generator or generated package.",
   "documentation.workflows.evaluation":
     "The Engineer confirms a certification job for the assembled package's exact hash. Certification checks the package and its evidence without executing its domain scripts.",
   "documentation.workflows.evaluation.report":
-    "Open Evaluations to inspect the retained report and its findings. If the package changes after that run, evaluate the new hash before approval.",
+    "Open Evaluations to inspect the retained report and results for any deferred lane concerns. If the package changes, evaluate the new hash before approval.",
   "documentation.workflows.publication":
     "The Workflow owner reviews the passing evaluation for the current package and confirms its approval. Confirm publication separately to publish those exact bytes. Later revisions need their own evaluation and approval.",
   "documentation.workflows.publication.install":
@@ -429,17 +459,47 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.dossier.approve":
     "工作流负责人批准用于起草或编写计划的确切档案版本。",
   "documentation.workflows.plan":
-    "工程师根据已批准的档案保存 FactoryPlan。审阅计划检查结果后，由工作流负责人批准当前计划及由此生成的确切提案。",
-  "documentation.workflows.plan.initialize":
-    "提案获批后，工程师选择“初始化项目”并确认预览，为生成工作流包创建项目。",
+    "在“计划”中选择“请求起草计划”，然后在排队中的草稿上选择“复制 Agent 提示词”。Agent 结束起草会话后，选择“审阅计划建议”。处理计划检查发现的问题，再确认“接受为计划版本”。也可用“编辑计划”直接编写新版本。",
+  "documentation.workflows.plan.drafts":
+    "通过草稿 ID 查找与 Agent 会话对应的记录。未被领取且未被接受的草稿可用“删除草稿”移除。已领取的草稿需等 Agent 结束会话或释放任务后才能删除。",
+  "documentation.workflows.plan.approve":
+    "工作流负责人选择已保存的版本，使用“审阅计划批准”批准对应的计划和语义档案哈希。再到“提案与初始化”单独批准由该计划生成的提案。",
+  "documentation.workflows.checks.title": "工作流审批与检查",
+  "documentation.workflows.checks.approvals":
+    "用决策节点让已登录的人员审批指定版本的产物。下游节点可在计划的 approvalRequirements 中声明所需的决策、选项和产物。WorkflowRuntime 在进入节点前以及查看节点或提交结果时校验审批。文件变更或产出节点重新运行后，需重新审批。",
+  "documentation.workflows.checks.verification":
+    "自动检查可通过可执行文件的哈希和公钥固定可信验证器。WorkflowRuntime 校验签名结果是否对应当前操作和产物范围。若后续步骤必须等待该检查通过，请在之前的节点声明该检查。",
+  "documentation.workflows.checks.hook":
+    "生成的钩子在被调用时检查 WorkflowRuntime 的当前操作。要由 Agent 宿主事件触发钩子，需在宿主中通过受支持的适配器注册。",
+  "documentation.workflows.proposal.initialize":
+    "在“提案与初始化”中，由工作流负责人批准根据当前已批准计划生成的提案。工程师选择“初始化项目”并确认预览。在“初始化任务”中查看进度，项目就绪后打开“软件包”。",
+  "documentation.workflows.proposal.replace":
+    "修订后的提案获批且已有 Creator 状态时，使用“替换 Creator 状态”，并确认现有状态的哈希。替换会撤回当前软件包，其生成、创作、评估和审阅进度将失效。",
   "documentation.workflows.package":
-    "工程师预览并确认生成，然后请求内核标记为就绪的创作通道。逐个审阅提交的声明及内容，再确认接受或拒绝。",
+    "选择“生成软件包”，并确认使用当前提案和 Creator 状态的预览。“生成任务”显示当前进度及以往尝试。“创作计划”列出通道、波次及依赖。",
+  "documentation.workflows.package.files":
+    "使用“筛选软件包文件”查找路径，例如 SKILL.md 或 reference/。选择路径即可预览内容。文件列表显示各文件的所有者和哈希。",
+  "documentation.workflows.package.dispatch":
+    "在“创作任务通道”中选择“请求可执行通道”，再对要派发的任务选择“复制 Agent 提示词”。交接材料包含该通道的说明、共享创作说明以及与该任务绑定的软件包输入。",
+  "documentation.workflows.package.regenerate":
+    "“软件包”提示生成器更新时，仍可查看已接受的报告。请求新草稿前，请选择“重新生成软件包”。新骨架会使上一骨架的创作、评估和审阅进度失效。",
   "documentation.workflows.package.assemble":
-    "所需通道的当前结果全部获接受后，预览并确认组装工作流包。使用组装后工作流包的确切哈希进行评估。",
+    "所需创作证据均为当前状态后，选择“组装软件包”并确认预览。评估时使用组装后软件包的确切哈希。",
+  "documentation.workflows.findings.title": "通道报告与后续工作",
+  "documentation.workflows.findings.report":
+    "在已提交的任务上选择“审阅结果”。确认决定前，阅读摘要、声明、发现的问题、证据和后续操作。接受后可用“查看报告”重新打开。展开通道行可查看“历史尝试”的报告。",
+  "documentation.workflows.findings.concerns":
+    "DONE_WITH_CONCERNS 表示 Agent 记录了尚待处理的问题。接受报告会保存这些问题。如果创作证据齐全，且每项问题均为轻微问题并已指定具体的评估检查，通道可继续推进。审阅软件包前，所有推迟到评估的检查都必须针对组装后的软件包通过。",
+  "documentation.workflows.findings.revise":
+    "处理好通道本身的问题后，打开已接受的报告，选择“请求修改稿”。新任务会收到当前输入及此前的问题。若已有修复任务在排队，请在该任务上选择“复制 Agent 提示词”。",
+  "documentation.workflows.findings.followUp":
+    "在“后续工作”中打开问题，或前往“来源”“语义档案”“计划”或“提案与初始化”查看对应发现。修订计划时，选择“确认并打开计划草稿”，系统将基于已批准的计划创建附有该发现的草稿。先审阅并批准修订后的输入，再重新生成软件包。",
+  "documentation.workflows.findings.badger":
+    "Badger 问题会标明需修复的范围，包括编写任务交接、软件包生成器、WorkflowRuntime 或 Agent 宿主。问题记录在“软件包”中，等待修复。如果修复改变了生成器或生成的软件包，需重新生成。",
   "documentation.workflows.evaluation":
     "工程师针对组装后工作流包的确切哈希确认认证任务。认证会检查工作流包及其证据，期间不执行其领域脚本。",
   "documentation.workflows.evaluation.report":
-    "在“评估”中查看保留的报告及检查结果。工作流包如有变更，需评估新的哈希后再批准。",
+    "在“评估”中查看保留的报告，包括推迟到评估的通道问题的检查结果。软件包变更后，需评估新的哈希再批准。",
   "documentation.workflows.publication":
     "工作流负责人审阅当前工作流包的通过报告并确认批准，再单独确认发布该版本。后续修订需要对应的评估和批准。",
   "documentation.workflows.publication.install":

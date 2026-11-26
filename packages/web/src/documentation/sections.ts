@@ -54,10 +54,28 @@ const workflowSubsections = [
   },
   {
     id: "plan-proposal",
-    title: "stage.planProposal",
+    title: "plan.title",
     actions: [
       "documentation.workflows.plan",
-      "documentation.workflows.plan.initialize",
+      "documentation.workflows.plan.drafts",
+      "documentation.workflows.plan.approve",
+    ],
+  },
+  {
+    id: "workflow-checks",
+    title: "documentation.workflows.checks.title",
+    actions: [
+      "documentation.workflows.checks.approvals",
+      "documentation.workflows.checks.verification",
+      "documentation.workflows.checks.hook",
+    ],
+  },
+  {
+    id: "proposal-initialization",
+    title: "proposal.title",
+    actions: [
+      "documentation.workflows.proposal.initialize",
+      "documentation.workflows.proposal.replace",
     ],
   },
   {
@@ -65,7 +83,21 @@ const workflowSubsections = [
     title: "stage.package",
     actions: [
       "documentation.workflows.package",
+      "documentation.workflows.package.files",
+      "documentation.workflows.package.dispatch",
+      "documentation.workflows.package.regenerate",
       "documentation.workflows.package.assemble",
+    ],
+  },
+  {
+    id: "authoring-findings",
+    title: "documentation.workflows.findings.title",
+    actions: [
+      "documentation.workflows.findings.report",
+      "documentation.workflows.findings.concerns",
+      "documentation.workflows.findings.revise",
+      "documentation.workflows.findings.followUp",
+      "documentation.workflows.findings.badger",
     ],
   },
   {
