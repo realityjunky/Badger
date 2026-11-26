@@ -1,4 +1,5 @@
-import { Alert, Button, Modal, Space, Spin, Tag } from "antd";
+import { InfoCircleOutlined } from "@ant-design/icons";
+import { Alert, Button, Modal, Space, Spin, Tag, Tooltip } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { ProposalView } from "../../api/proposals.js";
@@ -11,6 +12,7 @@ import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
+import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
 
@@ -23,7 +25,7 @@ export function WorkflowProposal({
   detail: WorkflowVersionDetail;
   onChanged(): void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const inbox = useInbox();
   const location = useLocation();
   const section = useRef<HTMLElement>(null);
@@ -161,23 +163,26 @@ export function WorkflowProposal({
   return (
     <WorkflowPanel
       title={t("proposal.title")}
+      hideHeading
+      showGuidance={false}
       ref={section}
       id="proposal"
       data-testid="workflow-proposal"
       aria-labelledby="proposal-title"
-      actions={
-        <Space wrap>
-          {proposal?.canInitialize &&
-            !approved &&
-            detail.capabilities.approveProposal && (
-              <Button
-                type="primary"
-                loading={busy}
-                onClick={() => void run(reviewApproval)}
-              >
-                {t("proposal.reviewApproval")}
-              </Button>
-            )}
+    >
+      <div className="proposal-toolbar">
+        <StageReviewGuidance stage="plan-proposal" />
+        <Space size={2}>
+          <Tooltip
+            title={t("proposal.description")}
+            trigger={["hover", "focus", "click"]}
+          >
+            <Button
+              type="text"
+              aria-label={t("proposal.about")}
+              icon={<InfoCircleOutlined aria-hidden="true" />}
+            />
+          </Tooltip>
           <ReloadRecordsButton
             disabled={busy}
             onClick={() => {
@@ -186,125 +191,209 @@ export function WorkflowProposal({
             }}
           />
         </Space>
-      }
-    >
-      <p className="muted">{t("proposal.description")}</p>
+      </div>
       <AuthoringStageFinding basePath={basePath} path={path} stage="proposal" />
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view ? (
         <Spin />
       ) : (
         <>
-          {view.confirmation?.invalidatedAt && (
-            <Alert type="warning" showIcon title={t("proposal.invalidated")} />
-          )}
-          {approved && (
-            <Alert type="success" showIcon title={t("proposal.approved")} />
-          )}
-          <ConfirmationHistory confirmations={view.confirmations} />
-          {!proposal ? (
-            <Alert
-              type="info"
-              showIcon
-              title={t("proposal.needPlan")}
-              description={<Link to="#plan">{t("plan.title")}</Link>}
-            />
-          ) : (
-            <>
-              <p>{proposal.goal}</p>
-              <dl className="gate-hashes">
-                <div>
-                  <dt>{t("proposal.hash")}</dt>
-                  <dd>
-                    <code>{proposal.proposalHash}</code>
-                  </dd>
-                </div>
-                <div>
-                  <dt>{t("plan.hash")}</dt>
-                  <dd>
-                    <code>{view.planVersionHash}</code>
-                  </dd>
-                </div>
-              </dl>
-              <h3>{t("workflow.sources")}</h3>
-              <ul className="gate-pins">
-                {proposal.sources.map((source) => (
-                  <li key={source.id}>
-                    {source.name} <Tag>{source.location}</Tag>
-                    <code>{source.hash}</code>
-                  </li>
-                ))}
-              </ul>
-              {proposal.blockers.length > 0 && (
+          <section
+            className="proposal-action-row"
+            aria-labelledby="proposal-approval-title"
+          >
+            <div className="proposal-action-controls">
+              <h3 id="proposal-approval-title">{t("proposal.approval")}</h3>
+              {proposal?.canInitialize &&
+                !approved &&
+                detail.capabilities.approveProposal && (
+                  <Button
+                    type="primary"
+                    loading={busy}
+                    onClick={() => void run(reviewApproval)}
+                  >
+                    {t("proposal.reviewApproval")}
+                  </Button>
+                )}
+              {!proposal && <Link to="#plan">{t("plan.title")}</Link>}
+            </div>
+            <div className="proposal-action-info">
+              {view.confirmation?.invalidatedAt && (
                 <Alert
-                  type="error"
+                  type="warning"
                   showIcon
-                  title={t("proposal.blockers")}
-                  description={
-                    <ul>
-                      {proposal.blockers.map((blocker) => (
-                        <li key={blocker}>{blocker}</li>
-                      ))}
-                    </ul>
-                  }
+                  title={t("proposal.invalidated")}
                 />
               )}
-              {proposal.warnings.map((warning) => (
-                <Alert key={warning} type="warning" showIcon title={warning} />
-              ))}
-            </>
-          )}
+              {approved && <Tag color="success">{t("proposal.approved")}</Tag>}
+              {!approved && proposal?.canInitialize && (
+                <Tag color="processing">{t("dossier.awaiting")}</Tag>
+              )}
+              {!proposal ? (
+                <Alert type="info" showIcon title={t("proposal.needPlan")} />
+              ) : (
+                <>
+                  <p>{proposal.goal}</p>
+                  {proposal.blockers.length > 0 && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      title={t("proposal.blockers")}
+                      description={
+                        <ul>
+                          {proposal.blockers.map((blocker) => (
+                            <li key={blocker}>{blocker}</li>
+                          ))}
+                        </ul>
+                      }
+                    />
+                  )}
+                  {proposal.warnings.map((warning) => (
+                    <Alert
+                      key={warning}
+                      type="warning"
+                      showIcon
+                      title={warning}
+                    />
+                  ))}
+                </>
+              )}
+              <ConfirmationHistory confirmations={view.confirmations} />
+            </div>
+          </section>
           <section
-            className="project-initialization"
+            className="proposal-action-row"
             aria-label={t("proposal.project")}
           >
-            <h3>{t("proposal.project")}</h3>
-            <p className="muted">{t("proposal.projectHelp")}</p>
-            {approved && detail.capabilities.initialize && (
-              <Button
-                type="primary"
-                disabled={busy || pending}
-                onClick={() =>
-                  view &&
-                  setReview({
-                    kind: "initialize",
-                    view,
-                    requestId: crypto.randomUUID(),
-                  })
-                }
-              >
-                {t(
-                  view?.currentState
-                    ? "proposal.replace"
-                    : "proposal.initialize",
-                )}
-              </Button>
-            )}
-            {view.currentState && (
-              <>
-                <h3>{t("proposal.currentState")}</h3>
-                <code className="gate-confirmation-hash">
-                  {view.currentState.hash}
-                </code>
-              </>
-            )}
-            {view.jobs.length > 0 && (
-              <div role="status" aria-live="polite">
-                <h3>{t("proposal.jobs")}</h3>
-                <ul>
-                  {view.jobs.map((job) => (
-                    <li key={job.id}>
-                      <Tag>{t(`proposal.status.${job.status}`)}</Tag>
-                      {job.error}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            {view.currentState && (
-              <Link to="#package">{t("package.title")}</Link>
-            )}
+            <div className="proposal-action-controls">
+              <h3>{t("proposal.project")}</h3>
+              {approved && detail.capabilities.initialize && (
+                <Button
+                  type="primary"
+                  disabled={busy || pending}
+                  onClick={() =>
+                    view &&
+                    setReview({
+                      kind: "initialize",
+                      view,
+                      requestId: crypto.randomUUID(),
+                    })
+                  }
+                >
+                  {t(
+                    view?.currentState
+                      ? "proposal.replace"
+                      : "proposal.initialize",
+                  )}
+                </Button>
+              )}
+              {view.currentState && (
+                <Link to="#package">{t("package.title")}</Link>
+              )}
+            </div>
+            <div className="proposal-action-info">
+              <p className="muted">{t("proposal.projectHelp")}</p>
+              {view.jobs.length > 0 && (
+                <div role="status" aria-live="polite">
+                  <h4>{t("proposal.jobs")}</h4>
+                  <ul className="proposal-jobs">
+                    {view.jobs.map((job) => (
+                      <li key={job.id}>
+                        <div className="proposal-job-heading">
+                          <span>
+                            {t("proposal.jobId")} <code>{job.id}</code>
+                          </span>
+                          <Tag
+                            color={
+                              {
+                                queued: "default",
+                                running: "processing",
+                                succeeded: "success",
+                                failed: "error",
+                                cancelled: "default",
+                              }[job.status]
+                            }
+                          >
+                            {t(`proposal.status.${job.status}`)}
+                          </Tag>
+                        </div>
+                        <dl className="proposal-job-times">
+                          {(
+                            ["requestedAt", "startedAt", "finishedAt"] as const
+                          ).map((key) => {
+                            const timestamp = job[key];
+                            return (
+                              timestamp && (
+                                <div key={key}>
+                                  <dt>{t(`proposal.${key}`)}</dt>
+                                  <dd>
+                                    <time dateTime={timestamp}>
+                                      {new Date(timestamp).toLocaleString(
+                                        locale,
+                                      )}
+                                    </time>
+                                  </dd>
+                                </div>
+                              )
+                            );
+                          })}
+                        </dl>
+                        {job.error && <p>{job.error}</p>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </section>
+          {(proposal || view.currentState) && (
+            <div className="proposal-references">
+              {proposal && (
+                <details>
+                  <summary>
+                    {t("workflow.sources")} ({proposal.sources.length})
+                  </summary>
+                  <ul className="gate-pins">
+                    {proposal.sources.map((source) => (
+                      <li key={source.id}>
+                        {source.name} <Tag>{source.location}</Tag>
+                        <code>{source.hash}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <details>
+                <summary>{t("plan.hashes")}</summary>
+                <dl className="gate-hashes">
+                  {proposal && (
+                    <div>
+                      <dt>{t("proposal.hash")}</dt>
+                      <dd>
+                        <code>{proposal.proposalHash}</code>
+                      </dd>
+                    </div>
+                  )}
+                  {view.planVersionHash && (
+                    <div>
+                      <dt>{t("plan.hash")}</dt>
+                      <dd>
+                        <code>{view.planVersionHash}</code>
+                      </dd>
+                    </div>
+                  )}
+                  {view.currentState && (
+                    <div>
+                      <dt>{t("proposal.currentState")}</dt>
+                      <dd>
+                        <code>{view.currentState.hash}</code>
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </details>
+            </div>
+          )}
         </>
       )}
       <Modal

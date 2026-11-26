@@ -443,6 +443,13 @@ for (const theme of ["light", "dark"] as const) {
 
       await page.goto(`${base}${root}#proposal`);
       const proposalPanel = page.getByTestId("workflow-proposal");
+      const aboutProposal = proposalPanel.getByRole("button", {
+        name: "About proposal approval and initialization",
+      });
+      await aboutProposal.hover();
+      await expect(page.getByRole("tooltip")).toHaveText(
+        "Review the workflow and pinned sources the kernel resolved from the approved plan. The Workflow owner approves this proposal before project initialization.",
+      );
       await proposalPanel
         .getByRole("button", { name: "Review proposal approval", exact: true })
         .click();
@@ -492,6 +499,29 @@ for (const theme of ["light", "dark"] as const) {
         authorProposal.getByText("Project initialized", { exact: true }),
       ).toBeVisible();
       const initialized = await call<ProposalView>("GET", `${root}/proposal`);
+      const completedJob = initialized.jobs.find(
+        (job) => job.status === "succeeded",
+      )!;
+      const jobRow = authorProposal
+        .getByRole("listitem")
+        .filter({ hasText: completedJob.id });
+      for (const timestamp of [
+        completedJob.requestedAt,
+        completedJob.startedAt,
+        completedJob.finishedAt,
+      ]) {
+        await expect(
+          jobRow.locator(`time[datetime="${timestamp}"]`).first(),
+        ).toBeVisible();
+      }
+      const references = authorProposal
+        .locator("details")
+        .filter({ has: author.getByText("Hashes", { exact: true }) });
+      await references.locator("summary").click();
+      await expect(
+        references.getByText(initialized.currentState!.hash, { exact: true }),
+      ).toBeVisible();
+      await references.locator("summary").click();
       await authorProposal
         .getByRole("button", { name: "Replace Creator state", exact: true })
         .click();
@@ -511,6 +541,25 @@ for (const theme of ["light", "dark"] as const) {
         path: proposalScreenshot,
         contentType: "image/png",
       });
+      const desktop = author.viewportSize()!;
+      const controls = authorProposal.getByRole("button", {
+        name: "Replace Creator state",
+      });
+      const bounds = await controls.boundingBox();
+      expect((await jobRow.boundingBox())!.x).toBeGreaterThan(
+        bounds!.x + bounds!.width,
+      );
+      await author.setViewportSize({ width: 390, height: 844 });
+      await expect(jobRow).toBeVisible();
+      expect((await jobRow.boundingBox())!.y).toBeGreaterThan(
+        (await controls.boundingBox())!.y,
+      );
+      expect(
+        await author.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      await author.setViewportSize(desktop);
 
       await author.goto(`${base}${root}#package`);
       const packagePanel = author.getByTestId("workflow-package");

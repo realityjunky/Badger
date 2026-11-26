@@ -228,6 +228,12 @@ const en = {
     "{name} · {version}: generation confirmation superseded",
 
   "proposal.title": "Proposal & initialization",
+  "proposal.about": "About proposal approval and initialization",
+  "proposal.approval": "Proposal approval",
+  "proposal.jobId": "Job ID",
+  "proposal.requestedAt": "Requested",
+  "proposal.startedAt": "Started",
+  "proposal.finishedAt": "Finished",
   "proposal.description":
     "Review the workflow and pinned sources the kernel resolved from the approved plan. The Workflow owner approves this proposal before project initialization.",
   "proposal.needPlan": "Approve the current plan to see its proposal.",
@@ -1977,6 +1983,12 @@ const zh: Record<MessageId, string> = {
   "inbox.generationInvalidated": "{name} · {version}：生成确认已被替代",
 
   "proposal.title": "提案与初始化",
+  "proposal.about": "关于提案审批与项目初始化",
+  "proposal.approval": "提案审批",
+  "proposal.jobId": "任务 ID",
+  "proposal.requestedAt": "请求时间",
+  "proposal.startedAt": "开始时间",
+  "proposal.finishedAt": "结束时间",
   "proposal.description":
     "查看内核根据已批准计划生成的提案。工作流负责人批准后，工程师可初始化项目。",
   "proposal.needPlan": "请先批准当前计划，再查看提案。",
