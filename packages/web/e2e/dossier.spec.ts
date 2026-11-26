@@ -265,6 +265,17 @@ for (const theme of ["light", "dark"] as const) {
         `${base}/workflows/${workflow.id}/versions/${version.id}#plan`,
       );
       const planning = author.getByTestId("workflow-plan");
+      const draftsTab = planning.getByRole("tab", {
+        name: "Plan drafting jobs and suggestions",
+      });
+      await expect(draftsTab).toHaveAttribute("aria-selected", "true");
+      await expect(
+        planning.getByText("No plan drafting jobs yet."),
+      ).toBeVisible();
+      await planning.getByRole("tab", { name: "Hashes", exact: true }).click();
+      await expect(
+        planning.getByRole("tabpanel", { name: "Hashes" }),
+      ).toHaveText("No plan version has been saved yet.");
       await planning
         .getByRole("button", { name: "About drafting jobs and suggestions" })
         .hover();
@@ -274,12 +285,12 @@ for (const theme of ["light", "dark"] as const) {
       await planning
         .getByRole("button", { name: "Request plan draft", exact: true })
         .click();
+      await expect(draftsTab).toHaveAttribute("aria-selected", "true");
       await expect(
-        planning.getByRole("heading", {
+        planning.getByRole("tabpanel", {
           name: "Plan drafting jobs and suggestions",
-          exact: true,
         }),
-      ).toBeVisible();
+      ).toContainText("Plan draft");
       await expect(author.getByRole("dialog")).toHaveCount(0);
       const { jobs } = await call<{
         jobs: { id: string; revision: number; kind: string }[];
@@ -376,6 +387,31 @@ for (const theme of ["light", "dark"] as const) {
         `${base}/workflows/${workflow.id}/versions/${version.id}#plan`,
       );
       const ownerPlan = page.getByTestId("workflow-plan");
+      await expect(
+        ownerPlan.getByRole("tab", {
+          name: "Plan drafting jobs and suggestions",
+        }),
+      ).toHaveAttribute("aria-selected", "true");
+      await ownerPlan.getByRole("tab", { name: "Canonical plan JSON" }).click();
+      const planJson = ownerPlan.getByRole("tabpanel", {
+        name: "Canonical plan JSON",
+      });
+      await planJson.getByLabel("Show exact canonical text").check();
+      expect(await planJson.locator("pre").textContent()).toBe(
+        plans.versions[0]!.canonicalJson,
+      );
+      await ownerPlan
+        .getByRole("tab", { name: "Node responsibilities" })
+        .click();
+      await expect(
+        ownerPlan.getByRole("tabpanel", { name: "Node responsibilities" }),
+      ).toContainText("Prepare the reviewed report");
+      await ownerPlan.getByRole("tab", { name: "Hashes", exact: true }).click();
+      const hashes = ownerPlan.getByRole("tabpanel", { name: "Hashes" });
+      await expect(hashes).toContainText(plans.versions[0]!.hash);
+      await expect(hashes).toContainText(
+        plans.versions[0]!.snapshot.dossierHash,
+      );
       await expect(
         ownerPlan.getByRole("button", { name: "Edit plan", exact: true }),
       ).toHaveCount(0);

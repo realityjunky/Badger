@@ -27,7 +27,7 @@ import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
 import { useLiveUpdates } from "../../live/LiveUpdatesContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
-import { PlanContent } from "./PlanContent.js";
+import { PlanContent, PlanTabs } from "./PlanContent.js";
 import { PlanEditor } from "./PlanEditor.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 import { selectedWorkflowTab } from "./WorkflowTabs.js";
@@ -77,6 +77,12 @@ export function WorkflowPlan({
   const selectedId = params.get("planVersion");
   const draftId = params.get("planDraft");
   const findingId = params.get("authoringFinding");
+  const tab = params.get("planTab");
+  function selectTab(key: string) {
+    if (key === "jobs") params.delete("planTab");
+    else params.set("planTab", key);
+    navigate({ search: params.toString(), hash: "#plan" });
+  }
   const selectedDraft = jobs.find((job) => job.id === draftId);
   const visibleJobs = selectedDraft
     ? [selectedDraft, ...jobs.filter((job) => job.id !== draftId)]
@@ -151,9 +157,9 @@ export function WorkflowPlan({
       section.current?.scrollIntoView({ block: "start" });
   }, [location.key, Boolean(view)]);
   useEffect(() => {
-    if (active && selectedDraft)
+    if (active && selectedDraft && (!tab || tab === "jobs"))
       selectedDraftRow.current?.scrollIntoView({ block: "center" });
-  }, [active, selectedDraft?.id]);
+  }, [active, selectedDraft?.id, tab]);
 
   async function changed() {
     setRefresh((r) => r + 1);
@@ -177,6 +183,7 @@ export function WorkflowPlan({
       kind: "draft-plan",
       confirmed: true,
     });
+    if (tab && tab !== "jobs") selectTab("jobs");
     await changed();
   }
   async function deleteDraft() {
@@ -308,7 +315,6 @@ export function WorkflowPlan({
         </Space>
       }
     >
-      <p className="muted">{t("plan.description")}</p>
       {!selectedDraft && (
         <AuthoringStageFinding basePath={basePath} path={path} stage="plan" />
       )}
@@ -324,9 +330,7 @@ export function WorkflowPlan({
               description={<Link to="#dossier">{t("dossier.title")}</Link>}
             />
           )}
-          {!selected ? (
-            <p className="empty-state">{t("plan.empty")}</p>
-          ) : (
+          {selected && (
             <>
               <Space wrap className="dossier-version-heading">
                 <Select
@@ -379,12 +383,10 @@ export function WorkflowPlan({
                 bound={{ name: "plan", hash: selected.hash }}
               />
               {approved && <Link to="#proposal">{t("proposal.title")}</Link>}
-              <PlanContent version={selected} />
             </>
           )}
-          {detail.capabilities.editPlan && jobs.length > 0 && (
-            <>
-              <h3>{t("plan.suggestions")}</h3>
+          <PlanTabs version={selected} tab={tab} onTab={selectTab}>
+            {detail.capabilities.editPlan && jobs.length > 0 ? (
               <ul className="questionnaire-concerns">
                 {visibleJobs.map((job) => (
                   <li
@@ -472,8 +474,16 @@ export function WorkflowPlan({
                   </li>
                 ))}
               </ul>
-            </>
-          )}
+            ) : (
+              <p className="empty-state">
+                {t(
+                  detail.capabilities.editPlan
+                    ? "plan.noDrafts"
+                    : "plan.draftsRestricted",
+                )}
+              </p>
+            )}
+          </PlanTabs>
           {editing && (
             <PlanEditor
               key={editing.job?.id ?? "plan-editor"}

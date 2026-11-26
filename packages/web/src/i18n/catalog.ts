@@ -259,8 +259,11 @@ const en = {
   "inbox.proposalInvalidated":
     "{name} · {version}: proposal approval superseded",
   "plan.title": "Plans",
-  "plan.description":
-    "The plan records how to implement the approved dossier. The Engineer saves a version for the Workflow owner to approve.",
+  "plan.hashes": "Hashes",
+  "plan.noDrafts": "No plan drafting jobs yet.",
+  "plan.draftsRestricted":
+    "Engineers and Administrators can view plan drafting jobs.",
+  "plan.noCanonical": "Canonical JSON is unavailable for this plan version.",
   "plan.needDossier": "Approve the current dossier before planning.",
   "plan.empty": "No plan version has been saved yet.",
   "plan.edit": "Edit plan",
@@ -2002,8 +2005,10 @@ const zh: Record<MessageId, string> = {
   "inbox.proposalReady": "{name} · {version}：等待批准提案",
   "inbox.proposalInvalidated": "{name} · {version}：提案审批已失效",
   "plan.title": "计划",
-  "plan.description":
-    "计划记录如何实现已批准的语义档案。工程师保存计划版本，由工作流负责人审批。",
+  "plan.hashes": "哈希",
+  "plan.noDrafts": "暂无计划起草任务。",
+  "plan.draftsRestricted": "工程师和管理员可查看计划起草任务。",
+  "plan.noCanonical": "此计划版本未提供规范 JSON。",
   "plan.needDossier": "请先批准当前语义档案，再开始计划。",
   "plan.empty": "尚未保存计划版本。",
   "plan.edit": "编辑计划",
