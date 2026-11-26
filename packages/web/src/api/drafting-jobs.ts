@@ -3,6 +3,8 @@ import type { FactoryPlan } from "./plans.js";
 import type {
   AuthoringLaneAction,
   AuthoringLaneFinding,
+  PlanConflict,
+  PlanConflictChoice,
   ScriptEffectSuggestion,
   SkillScriptSideEffect,
 } from "@realityjunky/badger";
@@ -85,6 +87,7 @@ export interface PlanDraftingJob extends Omit<
   roundId: null;
   result: { plan: FactoryPlan } | null;
   review: DraftingReview<{ plan: FactoryPlan }> | null;
+  reconciliationHeadId?: string;
   authoringFollowUp?: {
     jobId: string;
     lane: string;
@@ -93,6 +96,16 @@ export interface PlanDraftingJob extends Omit<
     findings: AuthoringLaneFinding[];
     basePlanVersionId: string;
   };
+}
+export interface PlanReconciliation {
+  headVersionId: string;
+  choices: Record<string, PlanConflictChoice>;
+}
+export interface PlanReconciliationPreview {
+  plan: FactoryPlan;
+  combinedPlanHash: string;
+  conflicts: PlanConflict[];
+  reconciliation: PlanReconciliation;
 }
 export interface AuthoringDraftingJob extends Omit<
   DraftingJob,

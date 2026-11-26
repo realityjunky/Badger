@@ -16,6 +16,8 @@ import type { FactoryPlan, PlanView } from "../../api/plans.js";
 import type {
   AnyDraftingJob,
   PlanDraftingJob,
+  PlanReconciliation,
+  PlanReconciliationPreview,
 } from "../../api/drafting-jobs.js";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import type {
@@ -29,6 +31,7 @@ import { useLiveUpdates } from "../../live/LiveUpdatesContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { PlanContent, PlanTabs } from "./PlanContent.js";
 import { PlanEditor } from "./PlanEditor.js";
+import { PlanConflicts } from "./PlanConflicts.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 import { WorkflowProposal } from "./WorkflowProposal.js";
 import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
@@ -61,6 +64,12 @@ export function WorkflowPlan({
   const [editing, setEditing] = useState<{
     plan: FactoryPlan;
     job?: PlanDraftingJob;
+    reconciliation?: PlanReconciliation;
+    combinedPlanHash?: string;
+  } | null>(null);
+  const [conflicting, setConflicting] = useState<{
+    job: PlanDraftingJob;
+    review: PlanReconciliationPreview;
   } | null>(null);
   const [approval, setApproval] = useState<{
     preview: GatePreview;
@@ -187,6 +196,32 @@ export function WorkflowPlan({
     });
     if (tab && tab !== "jobs") selectTab("jobs");
     await changed();
+  }
+  async function reviewLaneDraft(
+    job: PlanDraftingJob,
+    choices: PlanReconciliation["choices"] = {},
+  ) {
+    const review = await questionnaireRequest<PlanReconciliationPreview>(
+      basePath,
+      path + "/drafting-jobs/" + job.id + "/reconcile-plan",
+      "POST",
+      {
+        revision: job.revision,
+        headVersionId: job.reconciliationHeadId,
+        choices,
+      },
+    );
+    if (review.conflicts.some(({ path }) => !Object.hasOwn(choices, path))) {
+      setConflicting({ job, review });
+    } else {
+      setConflicting(null);
+      setEditing({
+        job,
+        plan: review.plan,
+        reconciliation: review.reconciliation,
+        combinedPlanHash: review.combinedPlanHash,
+      });
+    }
   }
   async function deleteDraft() {
     if (!deleting) return;
@@ -448,7 +483,14 @@ export function WorkflowPlan({
                           <span className="plan-draft-id">
                             {t("plan.draft")} <code>{job.id}</code>
                           </span>
-                          <Tag>{t(`drafting.state.${job.status}`)}</Tag>
+                          <Tag>
+                            {t(
+                              job.reconciliationHeadId &&
+                                ["submitted", "cancelled"].includes(job.status)
+                                ? "plan.newerVersion"
+                                : `drafting.state.${job.status}`,
+                            )}
+                          </Tag>
                           {["queued", "submitted"].includes(job.status) &&
                             detail.capabilities.editPlan && (
                               <AgentPromptButton
@@ -456,8 +498,18 @@ export function WorkflowPlan({
                                 path={`${path}/drafting-jobs/${job.id}/prompt`}
                               />
                             )}
-                          {job.status === "submitted" && (
-                            <>
+                          {job.reconciliationHeadId &&
+                          ["submitted", "cancelled"].includes(job.status) ? (
+                            <Button
+                              disabled={busy || !view.skeleton}
+                              onClick={() =>
+                                void run(() => reviewLaneDraft(job))
+                              }
+                            >
+                              {t("plan.reconcile")}
+                            </Button>
+                          ) : (
+                            job.status === "submitted" && (
                               <Button
                                 disabled={busy || !view.skeleton}
                                 onClick={() =>
@@ -471,19 +523,21 @@ export function WorkflowPlan({
                               >
                                 {t("plan.reviewSuggestion")}
                               </Button>
-                              <Button
-                                disabled={busy}
-                                onClick={() =>
-                                  setDiscard({
-                                    job,
-                                    reason: "",
-                                    requestId: crypto.randomUUID(),
-                                  })
-                                }
-                              >
-                                {t("drafting.discard")}
-                              </Button>
-                            </>
+                            )
+                          )}
+                          {job.status === "submitted" && (
+                            <Button
+                              disabled={busy}
+                              onClick={() =>
+                                setDiscard({
+                                  job,
+                                  reason: "",
+                                  requestId: crypto.randomUUID(),
+                                })
+                              }
+                            >
+                              {t("drafting.discard")}
+                            </Button>
                           )}
                           {job.status !== "claimed" &&
                             job.status !== "accepted" && (
@@ -518,6 +572,18 @@ export function WorkflowPlan({
                   </p>
                 )}
               </PlanTabs>
+              {conflicting && (
+                <PlanConflicts
+                  key={conflicting.job.id}
+                  review={conflicting.review}
+                  busy={busy}
+                  failure={failure}
+                  onClose={() => setConflicting(null)}
+                  onReview={(choices) =>
+                    void run(() => reviewLaneDraft(conflicting.job, choices))
+                  }
+                />
+              )}
               {editing && (
                 <PlanEditor
                   key={editing.job?.id ?? "plan-editor"}
@@ -525,6 +591,8 @@ export function WorkflowPlan({
                   path={path}
                   view={view}
                   initialPlan={editing.plan}
+                  reconciliation={editing.reconciliation}
+                  combinedPlanHash={editing.combinedPlanHash}
                   job={editing.job}
                   onClose={() => setEditing(null)}
                   onSaved={() => {

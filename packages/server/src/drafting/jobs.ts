@@ -54,6 +54,7 @@ import {
 import { readPromptTemplate } from "../prompt-templates.js";
 import { saveDraftingReview, validateDraftingSubmission } from "./reviews.js";
 import { workingDossierBasis } from "../working-dossier.js";
+import type { PlanReconciliation } from "./plan-reconciliation.js";
 
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
@@ -70,6 +71,7 @@ export interface DraftingJobRow {
   requester_id: string;
   context_bundle: DraftingBundle;
   context_hash: string;
+  reconciliationHeadId?: string;
   input_hash: string;
   output_schema: object;
   status:
@@ -111,6 +113,9 @@ export function publicDraftingJob(row: DraftingJobRow) {
     parentQuestionId: row.parent_question_id,
     requesterId: row.requester_id,
     contextHash: row.context_hash,
+    ...(row.reconciliationHeadId && {
+      reconciliationHeadId: row.reconciliationHeadId,
+    }),
     currentResultHash: row.review_hash ?? row.result_hash,
     currentResultPath:
       row.review_result !== null
@@ -288,7 +293,12 @@ export async function reconcileDraftingJobs(
   );
   const jobs = await readDraftingJobs(tx, versionId);
   for (const job of jobs) {
-    if (!["queued", "claimed", "submitted"].includes(job.status)) continue;
+    const followUp =
+      job.kind === "draft-plan" && job.context_bundle.authoringFollowUp;
+    const historical =
+      job.status === "cancelled" && followUp && job.result !== null;
+    if (!historical && !["queued", "claimed", "submitted"].includes(job.status))
+      continue;
     let inputs = current.bundle;
     if (job.kind === "source-study" && job.result !== null) {
       const pin = job.context_bundle.pins.find(
@@ -306,6 +316,25 @@ export async function reconcileDraftingJobs(
         };
     }
     const target = draftingTarget(job);
+    const planning = inputs.planning;
+    const legacy = portableAuthoringHistory(job.context_bundle).legacy;
+    if (
+      followUp &&
+      planning?.basePlanVersionId &&
+      (historical || planning.basePlanVersionId !== followUp.basePlan.id) &&
+      job.context_bundle.planning?.basePlanVersionId === followUp.basePlan.id &&
+      current.planDossierHash === planning.input.dossierHash &&
+      !legacy
+    ) {
+      const originalBase = {
+        ...inputs,
+        planning: { ...planning, basePlanVersionId: followUp.basePlan.id },
+      };
+      if (draftingInputHash(originalBase, target) === job.input_hash) {
+        job.reconciliationHeadId = planning.basePlanVersionId;
+      }
+    }
+    if (historical) continue;
     // Reproject saved discovery inputs so jobs queued before optional reviews
     // compare the same workflow evidence as new jobs.
     const inputHash =
@@ -314,8 +343,10 @@ export async function reconcileDraftingJobs(
         ? draftingInputHash(job.context_bundle, target)
         : job.input_hash;
     const changed =
-      portableAuthoringHistory(job.context_bundle).legacy ||
-      (!isAuthoringJob(job) && inputHash !== draftingInputHash(inputs, target));
+      legacy ||
+      (!job.reconciliationHeadId &&
+        !isAuthoringJob(job) &&
+        inputHash !== draftingInputHash(inputs, target));
     const expired =
       job.status === "claimed" &&
       new Date(job.lease_until!).getTime() <= deps.clock.now().getTime();
@@ -596,6 +627,7 @@ export async function jobDecisionPreview(
   blobs: BlobStore,
   result?: unknown,
   reason?: unknown,
+  reconciliation?: PlanReconciliation,
 ) {
   const decision =
     action === "accept"
@@ -668,6 +700,7 @@ export async function jobDecisionPreview(
     resultHash: job.result_hash,
     action,
     decision,
+    ...(reconciliation && { reconciliation }),
     resolutionConfirmationHash: resolution?.confirmationHash ?? null,
   };
   return { ...bound, confirmationHash: canonicalHash(bound) };
@@ -697,7 +730,7 @@ export async function decideDraftingJob(
       deps,
       actor,
       composeFactoryPlan(planning.input, preview.decision.plan),
-      planning.basePlanVersionId,
+      preview.reconciliation?.headVersionId ?? planning.basePlanVersionId,
     );
     planVersionId = stored.version.id;
   }

@@ -384,6 +384,238 @@ it("opens one plan draft from a confirmed lane blocker without changing the curr
   });
 });
 
+it("reviews concurrent lane plan repairs against the current plan and replays the exact decision", async () => {
+  const fixture = await generated();
+  const { call, base } = fixture;
+  const { jobs } = await call(
+    base + "/package/authoring-jobs",
+    "POST",
+    { confirmed: true },
+    engineer,
+    201,
+  );
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "plan repairs", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const drafts = [];
+  let inFlight:
+    | { route: string; leaseId: string; contextHash: string; plan: unknown }
+    | undefined;
+  for (const lane of ["script", "reference", "pause-points"]) {
+    const { job: report } = await acceptLane(
+      fixture,
+      secret,
+      jobs.find((job: any) => job.laneId === lane),
+      (context) => ({
+        lane,
+        status: "BLOCKED",
+        semanticDossierHash: context.authoring.plan.semanticDossierHash,
+        summary: "The review contract needs a change.",
+        action: {
+          kind: "repair",
+          target: { stage: "plan" },
+          requirement: "Revise the report contract.",
+          prompt: "Revise the report node.",
+        },
+      }),
+    );
+    const route =
+      base + "/drafting-jobs/" + report.decision.followUp.planDraftId;
+    const { job } = await call(route);
+    const claim = await call(
+      route + "/claim",
+      "POST",
+      { revision: job.revision },
+      engineer,
+      200,
+      secret,
+    );
+    const plan = claim.contextBundle.authoringFollowUp.basePlan.plan;
+    const node = plan.workflow.customNodes[0];
+    node.label = lane === "reference" ? "reference label" : "script label";
+    if (lane === "reference")
+      node.guardrails.push({
+        id: "reference-check",
+        label: "Reference evidence for the report.",
+        validation: "evidence-only",
+      });
+    else node.responsibility = "Keep the reviewed report.";
+    const { job: submitted } = await call(
+      route + "/submit",
+      "POST",
+      {
+        leaseId: claim.job.lease.id,
+        contextHash: claim.job.contextHash,
+        result: { plan },
+        keepClaim: lane === "pause-points",
+      },
+      engineer,
+      200,
+      secret,
+    );
+    if (lane === "pause-points") {
+      inFlight = {
+        route,
+        leaseId: claim.job.lease.id,
+        contextHash: claim.job.contextHash,
+        plan,
+      };
+      continue;
+    }
+    const decision = { revision: submitted.revision, plan };
+    const { preview } = await call(route + "/accept-preview", "POST", decision);
+    drafts.push({
+      route,
+      decision,
+      confirmation: {
+        ...decision,
+        confirmed: true,
+        confirmationHash: preview.confirmationHash,
+        requestId: "accept-" + lane,
+      },
+    });
+  }
+  const [script, reference] = drafts;
+  const first = await call(
+    script!.route + "/accept",
+    "POST",
+    script!.confirmation,
+  );
+  const headVersionId = first.job.decision.planVersionId;
+  const { job: pending } = await call(reference!.route);
+  expect(pending.status).toBe("submitted");
+  expect(pending.reconciliationHeadId).toBe(headVersionId);
+  await fixture.approve("plan", owner);
+  const approved = await call(base + "/plan");
+  const identical = { headVersionId, choices: {} };
+  const duplicate = inFlight!;
+  expect((await call(duplicate.route)).job.status).toBe("claimed");
+  const { job: finished } = await call(
+    duplicate.route + "/finish",
+    "POST",
+    { leaseId: duplicate.leaseId, contextHash: duplicate.contextHash },
+    engineer,
+    200,
+    secret,
+  );
+  const sameDecision = {
+    revision: finished.revision,
+    plan: duplicate.plan,
+    reconciliation: identical,
+  };
+  const { preview: samePreview } = await call(
+    duplicate.route + "/accept-preview",
+    "POST",
+    sameDecision,
+  );
+  const same = await call(duplicate.route + "/accept", "POST", {
+    ...sameDecision,
+    confirmed: true,
+    confirmationHash: samePreview.confirmationHash,
+    requestId: "same-plan",
+  });
+  expect(same.job.decision.planVersionId).toBe(headVersionId);
+  expect(await call(base + "/plan")).toEqual(approved);
+  await call(
+    reference!.route + "/accept",
+    "POST",
+    reference!.confirmation,
+    engineer,
+    409,
+  );
+  const review = await call(reference!.route + "/reconcile-plan", "POST", {
+    revision: pending.revision,
+    headVersionId,
+    choices: {},
+  });
+  expect(review.conflicts).toHaveLength(1);
+  expect(review.conflicts[0]).toMatchObject({
+    current: "script label",
+    draft: "reference label",
+  });
+  await call(
+    reference!.route + "/accept-preview",
+    "POST",
+    {
+      revision: pending.revision,
+      plan: review.plan,
+      reconciliation: identical,
+    },
+    engineer,
+    409,
+  );
+  const reconciliation = {
+    headVersionId,
+    choices: { [review.conflicts[0].path]: "draft" },
+  };
+  const resolved = await call(reference!.route + "/reconcile-plan", "POST", {
+    revision: pending.revision,
+    ...reconciliation,
+  });
+  expect(resolved.plan.workflow.customNodes[0]).toMatchObject({
+    label: "reference label",
+    responsibility: "Keep the reviewed report.",
+    guardrails: [{ id: "reference-check" }],
+  });
+  await call(
+    reference!.route + "/accept-preview",
+    "POST",
+    { ...reference!.decision, reconciliation },
+    engineer,
+    409,
+  );
+  const decision = {
+    revision: pending.revision,
+    plan: resolved.plan,
+    reconciliation,
+  };
+  const editedPlan = structuredClone(resolved.plan);
+  editedPlan.workflow.customNodes[0].label = "A reviewed combination";
+  for (const [editedFromHash, status] of [
+    ["obsolete", 409],
+    [resolved.combinedPlanHash, 200],
+  ] as const) {
+    await call(
+      reference!.route + "/accept-preview",
+      "POST",
+      {
+        ...decision,
+        plan: editedPlan,
+        reconciliation: { ...reconciliation, editedFromHash },
+      },
+      engineer,
+      status,
+    );
+  }
+  const { preview } = await call(
+    reference!.route + "/accept-preview",
+    "POST",
+    decision,
+  );
+  const confirmation = {
+    ...decision,
+    confirmed: true,
+    confirmationHash: preview.confirmationHash,
+    requestId: "reconciled-reference",
+  };
+  const accepted = await call(
+    reference!.route + "/accept",
+    "POST",
+    confirmation,
+  );
+  expect(
+    await call(reference!.route + "/accept", "POST", confirmation),
+  ).toEqual(accepted);
+  const current = await call(base + "/plan");
+  expect(current.versions).toHaveLength(3);
+  expect(current.versions[0].snapshot.plan).toEqual(resolved.plan);
+  expect(accepted.job.result.plan).toEqual(reference!.decision.plan);
+});
+
 it("links accepted Sources, Dossier, and Proposal findings to their exact inputs", async () => {
   const fixture = await generated();
   const { call, base, dossier, skill } = fixture;

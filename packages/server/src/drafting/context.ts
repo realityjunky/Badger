@@ -102,7 +102,11 @@ export async function draftingContext(
     concerns: await readConcerns(tx, versionId),
     comments: await readComments(tx, versionId, true),
   };
-  return { bundle, hash: canonicalHash(bundle) };
+  return {
+    bundle,
+    hash: canonicalHash(bundle),
+    planDossierHash: currentPlan?.snapshot.dossierHash,
+  };
 }
 
 export type DraftingBundle = Awaited<

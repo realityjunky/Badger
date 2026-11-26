@@ -2808,6 +2808,20 @@ button.rail-link {
   margin-block: 16px;
   min-height: 32px;
 }
+.plan-conflict {
+  margin-block: 16px;
+  min-width: 0;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-panel);
+}
+.plan-conflict legend,
+.plan-conflict pre {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.plan-conflict pre {
+  margin: 0 0 8px;
+}
 #factory-plan-json {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   tab-size: 2;

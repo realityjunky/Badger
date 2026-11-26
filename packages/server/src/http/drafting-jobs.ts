@@ -25,6 +25,7 @@ import {
   type DraftingActor,
 } from "../drafting/jobs.js";
 import { saveDraftingReview } from "../drafting/reviews.js";
+import { reviewPlanReconciliation } from "../drafting/plan-reconciliation.js";
 import { draftingSkills } from "../drafting/context.js";
 import { draftingJobPrompt } from "../drafting/prompts.js";
 import { readVersion } from "../skills/library.js";
@@ -42,7 +43,7 @@ import {
 } from "../drafting/schema.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|finish|renew|release|review|review-claim|accept-preview|accept|reject-preview|reject))?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|finish|renew|release|review|review-claim|reconcile-plan|accept-preview|accept|reject-preview|reject))?)?$/u;
 const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
   "draft-questions": ["roundId"],
   "draft-follow-ups": ["roundId", "parentQuestionId"],
@@ -319,8 +320,32 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       await auditJob(tx, deps, actor, job, "viewed", null);
       return { status: 200, value: { job: publicDraftingJob(job) } };
     }
-    if (job.status === "cancelled")
+    const historicalPlan =
+      job.status === "cancelled" &&
+      !!job.reconciliationHeadId &&
+      ["reconcile-plan", "accept-preview", "accept"].includes(action);
+    if (job.status === "cancelled" && !historicalPlan)
       return conflict("The job's inputs changed; request a new job");
+    if (action === "reconcile-plan") {
+      fields(body, ["revision", "headVersionId", "choices"]);
+      if (actor.credential.kind === "token" || !workflowAccess.editPlan)
+        throw new RequestError(
+          403,
+          "Only a signed-in Engineer reviews plan repairs",
+        );
+      if (
+        (!historicalPlan && job.status !== "submitted") ||
+        revisionInput(body.revision) !== job.revision
+      )
+        return conflict(
+          "The draft changed. Reopen it against the current plan.",
+        );
+      const review = await reviewPlanReconciliation(tx, job, {
+        headVersionId: body.headVersionId,
+        choices: body.choices,
+      });
+      return { status: 200, value: review };
+    }
     if (action === "prompt") {
       if (!["queued", "submitted"].includes(job.status))
         return conflict(
@@ -570,6 +595,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
     fields(body, [
       "revision",
       ...(accept ? draftResultFields(job.kind) : ["reason"]),
+      ...(accept && job.kind === "draft-plan" ? ["reconciliation"] : []),
       "confirmationHash",
       "confirmed",
       "requestId",
@@ -578,7 +604,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       return conflict(
         "This request ID already confirmed a different drafting decision",
       );
-    if (job.status !== "submitted")
+    if (job.status !== "submitted" && !historicalPlan)
       return conflict("Only submitted suggestions can be reviewed");
     if (revisionInput(body.revision) !== job.revision)
       return conflict("The job changed; review it again");
@@ -597,6 +623,21 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       return conflict(
         "The saved review changed. Open Review decisions again to use the saved edits.",
       );
+    const reconcile =
+      accept &&
+      job.kind === "draft-plan" &&
+      (job.reconciliationHeadId || body.reconciliation !== undefined);
+    if (reconcile && !body.reconciliation)
+      return conflict(
+        "A new plan version was saved. Review this lane draft against the current plan.",
+      );
+    const reconciliation = reconcile
+      ? (
+          await reviewPlanReconciliation(tx, job, body.reconciliation, {
+            plan: body.plan,
+          })
+        ).reconciliation
+      : undefined;
     const preview = await jobDecisionPreview(
       tx,
       actor,
@@ -607,6 +648,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         draftResultFields(job.kind).map((key) => [key, body[key]]),
       ),
       accept ? undefined : textInput(body.reason, "reason"),
+      reconciliation,
     );
     if (action.endsWith("-preview")) {
       await auditJob(tx, deps, actor, job, "previewed", null);

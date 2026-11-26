@@ -5,7 +5,10 @@ import type {
   PlanComposition,
   PlanView,
 } from "../../api/plans.js";
-import type { PlanDraftingJob } from "../../api/drafting-jobs.js";
+import type {
+  PlanDraftingJob,
+  PlanReconciliation,
+} from "../../api/drafting-jobs.js";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { PlanContent } from "./PlanContent.js";
@@ -15,6 +18,8 @@ export function PlanEditor({
   path,
   view,
   initialPlan,
+  reconciliation,
+  combinedPlanHash,
   job,
   onClose,
   onSaved,
@@ -23,12 +28,19 @@ export function PlanEditor({
   path: string;
   view: PlanView;
   initialPlan: FactoryPlan;
+  reconciliation?: PlanReconciliation;
+  combinedPlanHash?: string;
   job?: PlanDraftingJob;
   onClose(): void;
   onSaved(): void;
 }) {
   const { t } = useI18n();
   const [text, setText] = useState(JSON.stringify(initialPlan, null, 2));
+  const [editCombined, setEditCombined] = useState(false);
+  const reviewedReconciliation = reconciliation && {
+    ...reconciliation,
+    ...(editCombined && { editedFromHash: combinedPlanHash }),
+  };
   const [binding] = useState(() => ({
     dossierHash: view.dossierHash,
     expectedVersionId: view.headVersionId,
@@ -109,6 +121,9 @@ export function PlanEditor({
       }>(basePath, `${path}/drafting-jobs/${job.id}/accept-preview`, "POST", {
         revision: job.revision,
         plan: composition.snapshot.plan,
+        ...(reviewedReconciliation && {
+          reconciliation: reviewedReconciliation,
+        }),
       });
       confirmationHash = result.preview.confirmationHash;
     }
@@ -129,6 +144,9 @@ export function PlanEditor({
         ? {
             revision: job.revision,
             plan,
+            ...(reviewedReconciliation && {
+              reconciliation: reviewedReconciliation,
+            }),
             confirmed: true,
             confirmationHash: review.confirmationHash,
             requestId: review.requestId,
@@ -155,7 +173,12 @@ export function PlanEditor({
         closable={!busy}
         maskClosable={!busy}
       >
-        <p>{t("plan.editorHelp")}</p>
+        <p>{t(reconciliation ? "plan.reconciledHelp" : "plan.editorHelp")}</p>
+        {combinedPlanHash && !editCombined && (
+          <Button disabled={busy} onClick={() => setEditCombined(true)}>
+            {t("plan.editCombined")}
+          </Button>
+        )}
         <label className="field-label" htmlFor="factory-plan-json">
           {t("plan.json")}
         </label>
@@ -165,6 +188,7 @@ export function PlanEditor({
           rows={18}
           spellCheck={false}
           disabled={busy}
+          readOnly={!!reconciliation && !editCombined}
           onChange={(event) => {
             setText(event.target.value);
             setComposition(null);
