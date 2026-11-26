@@ -41,6 +41,7 @@ import {
   normalizeWorkflowFinalizationDefinition,
   validateWorkflowFinalizationDefinition,
 } from "./finalization.js";
+import { approvalRequirementProblems } from "./approval-requirements.js";
 
 interface CompiledWorkflow {
   package: SkillPackage;
@@ -738,6 +739,21 @@ export async function compileWorkflow(
     : normalizedProtocol;
   validateProtocolShape(executableProtocol);
   validateWorkflowDecisionScopeDefinition(executableProtocol);
+  const approvalProblems = approvalRequirementProblems(
+    executableProtocol.nodes,
+    executableProtocol.outputSchemas,
+  );
+  if (approvalProblems.length)
+    throw new Error(approvalProblems.map(({ message }) => message).join("\n"));
+  if (
+    executableProtocol.nodes.some(
+      (node) => !node.disabled && node.approvalRequirements,
+    ) &&
+    !executableProtocol.capabilities?.features.includes("versioned-artifacts")
+  )
+    throw new Error(
+      "Workflow approval requirements require versioned-artifacts",
+    );
   const revisioned = isRevisionedWorkflowProtocol(executableProtocol);
   if (
     executableProtocol.capabilities?.durability?.capabilities.includes(

@@ -292,6 +292,8 @@ export async function guardWorkflowHook(event) {
     throw new Error(
       "Missing workflow state. Run workflow-state.mjs init first.",
     );
+  if (continuation.disposition === "blocked" && continuation.blockers?.length)
+    throw blockedError(continuation);
   const { disposition, currentNode, pendingAction } = continuation;
   if (
     disposition !== "continue" ||
@@ -340,6 +342,8 @@ async function main() {
   requireCurrentAction(options.actionid, continuation);
 
   if (command === "entry") {
+    if (continuation.disposition === "blocked")
+      throw blockedError(continuation);
     if (options.json) printJson(continuation);
     else console.log(`ENTRY OK: ${continuation.currentNode ?? "checkpoint"}`);
     return;

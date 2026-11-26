@@ -224,8 +224,9 @@ Badger preserves the six-lane package-construction contract:
 Providers receive only bounded file handoffs and capability metadata. They
 cannot write Creator or authoring state, execute candidate Skills, publish,
 distribute, access credentials, or invent routes. `BLOCKED` and
-`NEEDS_CONTEXT` stop dependent lanes; `DONE_WITH_CONCERNS` remains visible and
-blocks final authoring readiness until resolved.
+`NEEDS_CONTEXT` stop dependent lanes. Open concerns also block readiness.
+An Engineer can accept complete evidence with minor findings assigned to named
+Evaluation checks. Those checks must pass for the assembled package.
 
 Deterministic assembly keeps the Auto zone separate from authored leaves,
 preserves source-owned upgrade files, records package inventory ownership, and

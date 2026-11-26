@@ -313,6 +313,7 @@ async function boundedBundle(
     handoff: projectedHandoff,
     files,
     repair: loaded.readiness.records[lane]?.action ?? null,
+    priorFindings: loaded.readiness.records[lane]?.findings ?? [],
   };
 }
 
@@ -325,6 +326,7 @@ export async function requestLaneJobs(
   versionId: string,
   repairLane?: AuthoringLaneId,
   excludedJobId?: string,
+  expectedAuthoringRevision?: number,
 ) {
   const loaded = await loadAuthoring(tx, config, versionId);
   assertCurrentGenerator(loaded.state);
@@ -336,6 +338,22 @@ export async function requestLaneJobs(
       409,
       "The package's approved inputs changed; regenerate before authoring",
     );
+  if (expectedAuthoringRevision !== undefined) {
+    const record = repairLane && loaded.readiness.records[repairLane];
+    if (
+      !repairLane ||
+      !record ||
+      record.revision !== expectedAuthoringRevision ||
+      record.status !== "DONE_WITH_CONCERNS" ||
+      loaded.readiness.completedLanes.includes(repairLane) ||
+      record.action?.target ||
+      record.action?.kind === "bug"
+    )
+      throw new RequestError(
+        409,
+        "The current lane report cannot be revised here",
+      );
+  }
   const { bundle } = await draftingContext(
     tx,
     workflowId,
@@ -421,7 +439,7 @@ export async function requestLaneJobs(
       job,
       "queued",
       null,
-      repairLane ? "Repair the blocked authoring lane" : null,
+      repairLane ? "Revise an Authoring lane report" : null,
     );
     created.push(job);
   }
@@ -451,6 +469,23 @@ export function validateLaneResult(job: DraftingJobRow, result: unknown) {
     proposal ? JSON.parse(proposal.text).workflow : undefined,
   );
   const target = output.action?.target;
+  if (authoring.handoff.sharedBriefPath) {
+    if (output.action?.kind === "bug" && !output.action.area)
+      findings.push("Name the Badger area responsible for the reported issue");
+    if (
+      output.status === "DONE_WITH_CONCERNS" &&
+      (!Array.isArray(output.findings) ||
+        !output.findings.length ||
+        output.findings.some(
+          (finding) =>
+            typeof finding?.owner !== "string" ||
+            !finding.owner.trim() ||
+            typeof finding?.fix !== "string" ||
+            !finding.fix.trim(),
+        ))
+    )
+      findings.push("Give each concern an owner and a next action");
+  }
   if (
     target?.stage === "sources" &&
     !job.context_bundle.pins.some(
@@ -713,7 +748,10 @@ export async function acceptLaneResult(
   );
   const action = record.action;
   let followUp;
-  if (record.status === "BLOCKED" && action?.target) {
+  if (
+    (record.status === "BLOCKED" || record.status === "DONE_WITH_CONCERNS") &&
+    action?.target
+  ) {
     followUp = await openStageFollowUp(tx, deps, actor, job, loaded, output, {
       ...action,
       target: action.target,

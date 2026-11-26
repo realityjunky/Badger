@@ -503,6 +503,15 @@ for (const theme of ["light", "dark"] as const) {
       ).toBeVisible();
       expect(await service.runSourceCheckJobs()).toBe(1);
       await expect(
+        packagePanel.getByRole("button", {
+          name: "Regenerate package",
+          exact: true,
+        }),
+      ).toBeVisible();
+      await packagePanel
+        .getByRole("tab", { name: "Generation jobs", exact: true })
+        .click();
+      await expect(
         generationJobs.getByText("Package generated", { exact: true }),
       ).toBeVisible();
       await expect(
@@ -574,7 +583,10 @@ for (const theme of ["light", "dark"] as const) {
         .getByRole("button", { name: "Request ready lanes", exact: true })
         .click();
       await expect(
-        authoring.getByText("Lane draft", { exact: true }),
+        authoring.getByRole("button", {
+          name: "Copy Agent prompt",
+          exact: true,
+        }),
       ).toHaveCount(3);
       const { jobs: laneJobs } = await call<{
         jobs: { id: string; laneId: string; revision: number }[];
@@ -598,6 +610,18 @@ for (const theme of ["light", "dark"] as const) {
             claims: [],
             artifacts: [],
             summary: "The report evidence needs repair.",
+            findings: [
+              {
+                severity: "important",
+                owner: "Workflow Engineer",
+                problem: "The report contract omits its expected source.",
+                impact: "The next lane cannot check the source citation.",
+                fix: "Map the primary source to the report citation.",
+                evidence: [
+                  "The approved output schema requires a source citation.",
+                ],
+              },
+            ],
             action: {
               kind: "repair",
               prompt: "Repair the report evidence mapping.",
@@ -621,8 +645,32 @@ for (const theme of ["light", "dark"] as const) {
         .getByRole("button", { name: "Confirm", exact: true })
         .click();
       await expect(author.getByRole("dialog")).toHaveCount(0);
+      const scriptRow = authoring
+        .getByRole("row")
+        .filter({ hasText: /^script/ });
+      await scriptRow.getByRole("button", { name: "Expand row" }).click();
+      await authoring
+        .getByRole("button", { name: "View report", exact: true })
+        .click();
+      const acceptedReport = author.getByRole("dialog", {
+        name: "script · Lane report",
+      });
       await expect(
-        authoring.getByText("Repair job", { exact: false }),
+        acceptedReport.getByText(
+          "The report contract omits its expected source.",
+        ),
+      ).toBeVisible();
+      await expect(
+        acceptedReport.getByText(
+          "The approved output schema requires a source citation.",
+        ),
+      ).toBeVisible();
+      await expect(
+        acceptedReport.getByRole("button", { name: "Preview acceptance" }),
+      ).toHaveCount(0);
+      await acceptedReport.getByRole("button", { name: "Close" }).click();
+      await expect(
+        authoring.getByText("Repair job needs dispatch", { exact: true }),
       ).toBeVisible();
       await expect(
         authoring.getByRole("button", {
@@ -630,6 +678,69 @@ for (const theme of ["light", "dark"] as const) {
           exact: true,
         }),
       ).toBeDisabled();
+      const queue = await call<{
+        jobs: {
+          id: string;
+          laneId: string;
+          status: string;
+          revision: number;
+        }[];
+      }>("GET", `${root}/drafting-jobs`);
+      const repair = queue.jobs.find(
+        (job) => job.laneId === "script" && job.status === "queued",
+      )!;
+      const repairRoute = `${root}/drafting-jobs/${repair.id}`;
+      const repairClaim = await call<{
+        job: { lease: { id: string }; contextHash: string };
+        contextBundle: unknown;
+      }>("POST", `${repairRoute}/claim`, { revision: repair.revision });
+      await call("POST", `${repairRoute}/submit`, {
+        leaseId: repairClaim.job.lease.id,
+        contextHash: repairClaim.job.contextHash,
+        result: {
+          laneOutput: {
+            ...reportLaneOutput(repairClaim.contextBundle),
+            status: "DONE_WITH_CONCERNS",
+            findings: [
+              {
+                severity: "minor",
+                owner: "Workflow Engineer",
+                problem: "The review used an incomplete handoff.",
+                fix: "Recheck the current handoff.",
+              },
+            ],
+          },
+        },
+      });
+      await authoring
+        .getByRole("button", { name: "Reload records", exact: true })
+        .click();
+      await scriptRow
+        .getByRole("button", { name: "Review result", exact: true })
+        .click();
+      await acceptedReport
+        .getByRole("button", { name: "Preview acceptance" })
+        .click();
+      await author
+        .getByRole("dialog", { name: "Confirm lane decision" })
+        .getByRole("button", { name: "Confirm", exact: true })
+        .click();
+      await scriptRow
+        .getByRole("button", { name: "View report", exact: true })
+        .click();
+      await expect(
+        acceptedReport.getByText("The review used an incomplete handoff."),
+      ).toBeVisible();
+      await acceptedReport
+        .getByRole("button", { name: "Request revised draft" })
+        .click();
+      await expect(acceptedReport).toBeHidden();
+      await expect(
+        scriptRow.getByRole("button", {
+          name: "Copy Agent prompt",
+          exact: true,
+        }),
+      ).toBeVisible();
       for (let wave = 0; wave < 3; wave++) {
         await call("POST", `${root}/package/authoring-jobs`, {
           confirmed: true,

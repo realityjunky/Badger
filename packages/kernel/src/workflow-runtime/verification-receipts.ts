@@ -1,3 +1,4 @@
+import { createPublicKey, verify } from "node:crypto";
 import {
   readOptionalEngineRunText,
   type EngineRunMutationOverlay,
@@ -14,6 +15,7 @@ import type {
   WorkflowVerificationReceiptProposal,
   WorkflowVerificationReceiptReference,
   WorkflowVerificationStatus,
+  WorkflowVerifierPin,
 } from "../types.js";
 import { sha256, stableValue } from "../util.js";
 import { parseWorkflowDurabilityProfile } from "./durability.js";
@@ -61,7 +63,12 @@ const RECEIPT_REFERENCE_KEYS = new Set([
   "evidenceHash",
   "truncated",
 ]);
-const RECEIPT_KEYS = new Set([...RECEIPT_REFERENCE_KEYS, "scope", "evidence"]);
+const RECEIPT_KEYS = new Set([
+  ...RECEIPT_REFERENCE_KEYS,
+  "scope",
+  "evidence",
+  "verifierSignature",
+]);
 const EVIDENCE_KEYS = new Set([
   "summary",
   "outputHash",
@@ -161,6 +168,7 @@ export interface WorkflowVerificationRequirementLike {
     evidence?: Array<{ id: string; required?: boolean }>;
   };
   requireContentSnapshot?: boolean;
+  verifierPin?: WorkflowVerifierPin;
 }
 
 export function validateWorkflowVerificationRequirement(
@@ -170,7 +178,14 @@ export function validateWorkflowVerificationRequirement(
   if (!isRecord(value)) throw new Error(`${label} must be an object`);
   assertKnownFields(
     value,
-    new Set(["id", "role", "kind", "scope", "requireContentSnapshot"]),
+    new Set([
+      "id",
+      "role",
+      "kind",
+      "scope",
+      "requireContentSnapshot",
+      "verifierPin",
+    ]),
     label,
   );
   if (
@@ -190,9 +205,26 @@ export function validateWorkflowVerificationRequirement(
   ) {
     throw new Error(`${label}.role must be a non-empty string`);
   }
-  workflowVerificationKinds(
+  const kinds = workflowVerificationKinds(
     value as unknown as WorkflowVerificationRequirementLike,
   );
+  if (value.verifierPin !== undefined) {
+    const pin = value.verifierPin;
+    if (
+      kinds.length !== 1 ||
+      kinds[0] !== "automated-check" ||
+      !isRecord(pin) ||
+      Object.keys(pin).length !== 2 ||
+      typeof pin.sha256 !== "string" ||
+      !HASH_PATTERN.test(pin.sha256) ||
+      typeof pin.publicKey !== "string" ||
+      !/^302a300506032b6570032100[a-f0-9]{64}$/u.test(pin.publicKey)
+    ) {
+      throw new Error(
+        `${label}.verifierPin requires an automated check, executable SHA-256 and Ed25519 public key`,
+      );
+    }
+  }
   if (
     value.requireContentSnapshot !== undefined &&
     typeof value.requireContentSnapshot !== "boolean"
@@ -562,6 +594,9 @@ function receiptIdentityMaterial(
     provider: receipt.provider,
     evidenceHash: receipt.evidenceHash,
     truncated: receipt.truncated,
+    ...(receipt.verifierSignature
+      ? { verifierSignature: receipt.verifierSignature }
+      : {}),
   };
 }
 
@@ -569,6 +604,62 @@ export function workflowVerificationReceiptHash(
   receipt: WorkflowVerificationReceipt,
 ): string {
   return sha256(JSON.stringify(stableValue(receiptIdentityMaterial(receipt))));
+}
+
+/** The trusted verifier signs its result for the exact runtime scope. */
+export function workflowVerifierSigningPayload(
+  pin: WorkflowVerifierPin,
+  receipt: WorkflowVerificationReceipt,
+): Buffer {
+  const {
+    issuedAt: _issuedAt,
+    verifierSignature: _signature,
+    ...binding
+  } = receiptIdentityMaterial(receipt);
+  return Buffer.from(
+    JSON.stringify(
+      stableValue({
+        kind: "badger-workflow-verifier-result-v1",
+        verifierSha256: pin.sha256,
+        ...binding,
+      }),
+    ),
+  );
+}
+
+export function assertWorkflowVerifierSignature(
+  pin: WorkflowVerifierPin | undefined,
+  receipt: WorkflowVerificationReceipt,
+): void {
+  if (!pin && !receipt.verifierSignature) return;
+  if (
+    pin &&
+    receipt.verifierSignature &&
+    verify(
+      null,
+      workflowVerifierSigningPayload(pin, receipt),
+      createPublicKey({
+        key: Buffer.from(pin.publicKey, "hex"),
+        format: "der",
+        type: "spki",
+      }),
+      Buffer.from(receipt.verifierSignature, "hex"),
+    )
+  )
+    return;
+  throw new Error(
+    `${RECEIPT_LABEL} has no valid pinned verifier signature: ${receipt.requirementId}`,
+  );
+}
+
+function signatureField(
+  value: unknown,
+  label: string,
+): { verifierSignature?: string } {
+  if (value === undefined) return {};
+  if (typeof value !== "string" || !/^[a-f0-9]{128}$/u.test(value))
+    throw new Error(`Invalid ${label}: verifierSignature is invalid`);
+  return { verifierSignature: value };
 }
 
 function receiptId(hash: string): string {
@@ -590,6 +681,7 @@ function referenceFromReceipt(
     kind: _kind,
     scope: _scope,
     evidence: _evidence,
+    verifierSignature: _signature,
     ...fields
   } = receipt;
   return {
@@ -690,6 +782,7 @@ export function parseWorkflowVerificationReceipt(
     issuedAt: timestamp(value.issuedAt, "issuedAt", label),
     evidenceHash: hashValue(value.evidenceHash, "evidenceHash", label),
     truncated: value.truncated as boolean,
+    ...signatureField(value.verifierSignature, label),
     scope,
     evidence,
   };
@@ -886,6 +979,7 @@ export function normalizeWorkflowVerificationProposal(
       "outputHash",
       "durationMs",
       "truncated",
+      "verifierSignature",
     ]),
     label,
   );
@@ -986,6 +1080,7 @@ export function normalizeWorkflowVerificationProposal(
     ...(contentSnapshotHash !== undefined ? { contentSnapshotHash } : {}),
     verifierSubject: identityText(verifierSubject, "verifierSubject", label),
     provider: identityText(provider, "provider", label),
+    ...signatureField(value.verifierSignature, label),
     evidence: normalizedEvidence,
   };
 }
@@ -1034,6 +1129,7 @@ export function createWorkflowVerificationReceipt(
     issuedAt: (options.now ?? new Date()).toISOString(),
     evidenceHash: evidenceHash(evidence),
     truncated: evidence.truncated,
+    ...signatureField(proposal.verifierSignature, RECEIPT_LABEL),
     scope,
     evidence,
   } satisfies WorkflowVerificationReceipt;

@@ -17,10 +17,21 @@ import { useI18n } from "../../i18n/I18nContext.js";
 type LaneJob = AuthoringDraftingJob & {
   createdAt: string;
   decision: {
-    decision?: { reason?: string };
+    decision?: {
+      reason?: string;
+      laneOutput?: NonNullable<AuthoringDraftingJob["result"]>["laneOutput"];
+    };
     followUp?: StageFollowUp;
   } | null;
 };
+
+function reportResult(job: LaneJob) {
+  const accepted =
+    job.status === "accepted" && job.decision?.decision?.laneOutput;
+  return accepted
+    ? { laneOutput: accepted }
+    : (job.review?.result ?? job.result);
+}
 type StageFollowUp = {
   stage: AuthoringRepairTarget["stage"] | null;
   targetId: string | null;
@@ -77,6 +88,35 @@ export function WorkflowAuthoring({
   const [busy, setBusy] = useState(false);
   const [reload, setReload] = useState(0);
   const [review, setReview] = useState<LaneJob | null>(null);
+  const reviewLane =
+    view &&
+    Object.values(view.readiness.lanes).find(
+      (lane) => lane.id === review?.laneId,
+    );
+  const reviewFollowUp = view?.followUps.find(
+    (item) => item.jobId === review?.id,
+  );
+  const canReviewSelected =
+    canManage && view?.current && review?.status === "submitted";
+  const canReviseSelected =
+    canManage &&
+    view?.current &&
+    review?.status === "accepted" &&
+    reviewLane &&
+    reviewLane.status === "DONE_WITH_CONCERNS" &&
+    !reviewLane.action?.target &&
+    reviewLane.action?.kind !== "bug" &&
+    !view.readiness.completedLanes.includes(reviewLane.id) &&
+    !view.jobs.some(
+      (job) =>
+        job.laneId === reviewLane.id &&
+        ["queued", "claimed", "submitted"].includes(job.status),
+    ) &&
+    view.readiness.records[reviewLane.id]?.revision !== undefined &&
+    [...view.jobs]
+      .reverse()
+      .find((job) => job.laneId === reviewLane.id && job.status === "accepted")
+      ?.id === review.id;
   const [reason, setReason] = useState("");
   const [decision, setDecision] = useState<{
     job: LaneJob;
@@ -189,6 +229,11 @@ export function WorkflowAuthoring({
     status === "submitted"
       ? t("authoring.submitted")
       : t(`drafting.state.${status}`);
+  const openReport = (job: LaneJob) => {
+    setDialogFailure(null);
+    setReview({ ...job, result: reportResult(job) });
+    setReason("");
+  };
   const target =
     decision?.action === "accept"
       ? decision.job.result?.laneOutput.action?.target
@@ -307,6 +352,11 @@ export function WorkflowAuthoring({
                             {job.decision?.decision?.reason && (
                               <p>{job.decision.decision.reason}</p>
                             )}
+                            {reportResult(job) && (
+                              <Button onClick={() => openReport(job)}>
+                                {t("authoring.viewReport")}
+                              </Button>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -322,6 +372,9 @@ export function WorkflowAuthoring({
                 render: (_, lane) => (
                   <>
                     <Tag>{lane.status}</Tag>
+                    {lane.status === "DONE_WITH_CONCERNS" && lane.summary && (
+                      <p>{lane.summary}</p>
+                    )}
                     {lane.blockers.length > 0 && (
                       <details>
                         <summary>{t("authoring.blockers")}</summary>
@@ -342,10 +395,11 @@ export function WorkflowAuthoring({
                     return (
                       <span className="muted">{t("authoring.noJob")}</span>
                     );
-                  const result = job.review?.result ?? job.result;
-                  const canReview = canManage && job.status === "submitted";
+                  const result = reportResult(job);
                   const canCopy =
-                    canReview || (canManage && job.status === "queued");
+                    canManage &&
+                    view.current &&
+                    ["submitted", "queued"].includes(job.status);
                   return (
                     <Space orientation="vertical" size="small">
                       <Space wrap size={[4, 4]}>
@@ -366,7 +420,13 @@ export function WorkflowAuthoring({
                         <Alert
                           type="warning"
                           showIcon
-                          title={t("authoring.badgerBug")}
+                          title={
+                            bug.area
+                              ? format("authoring.badgerIssueArea", {
+                                  area: t(`authoring.area.${bug.area}`),
+                                })
+                              : t("authoring.badgerBug")
+                          }
                           description={
                             <>
                               <div>{bug.requirement}</div>
@@ -390,24 +450,26 @@ export function WorkflowAuthoring({
                           }
                         />
                       )}
-                      {canCopy && (
+                      {(canCopy || result) && (
                         <Space wrap>
-                          {canReview && (
-                            <Button
-                              onClick={() => {
-                                setDialogFailure(null);
-                                setReview({ ...job, result });
-                                setReason("");
-                              }}
-                            >
-                              {t("authoring.inspect")}
+                          {result && (
+                            <Button onClick={() => openReport(job)}>
+                              {t(
+                                canManage &&
+                                  view.current &&
+                                  job.status === "submitted"
+                                  ? "authoring.inspect"
+                                  : "authoring.viewReport",
+                              )}
                             </Button>
                           )}
-                          <AgentPromptButton
-                            key={job.id}
-                            basePath={basePath}
-                            path={`${path}/drafting-jobs/${job.id}/prompt`}
-                          />
+                          {canCopy && (
+                            <AgentPromptButton
+                              key={job.id}
+                              basePath={basePath}
+                              path={`${path}/drafting-jobs/${job.id}/prompt`}
+                            />
+                          )}
                         </Space>
                       )}
                     </Space>
@@ -451,38 +513,111 @@ export function WorkflowAuthoring({
       )}
       <Modal
         open={!!review}
-        title={`${review?.laneId ?? ""} — ${t("authoring.inspect")}`}
+        title={`${review?.laneId ?? ""} · ${t("authoring.report")}`}
         onCancel={() => {
           if (busy) return;
           setReview(null);
           setDialogFailure(null);
         }}
         footer={
-          <Space>
-            <Button
-              disabled={busy || !reason.trim()}
-              onClick={() =>
-                review && void run(() => preview(review, "reject"), true)
-              }
-            >
-              {t("authoring.reject")}
-            </Button>
+          canReviewSelected ? (
+            <Space>
+              <Button
+                disabled={busy || !reason.trim()}
+                onClick={() =>
+                  review && void run(() => preview(review, "reject"), true)
+                }
+              >
+                {t("authoring.reject")}
+              </Button>
+              <Button
+                type="primary"
+                disabled={busy}
+                onClick={() =>
+                  review && void run(() => preview(review, "accept"), true)
+                }
+              >
+                {t("authoring.accept")}
+              </Button>
+            </Space>
+          ) : canReviseSelected ? (
             <Button
               type="primary"
-              disabled={busy}
-              onClick={() =>
-                review && void run(() => preview(review, "accept"), true)
-              }
+              loading={busy}
+              onClick={() => {
+                const revision =
+                  view?.readiness.records[reviewLane.id]?.revision;
+                void run(async () => {
+                  await request("/package/authoring-jobs", "POST", {
+                    confirmed: true,
+                    lane: reviewLane.id,
+                    authoringRevision: revision,
+                  });
+                  setReview(null);
+                  refresh();
+                }, true);
+              }}
             >
-              {t("authoring.accept")}
+              {t("authoring.requestRevision")}
             </Button>
-          </Space>
+          ) : null
         }
         width={860}
       >
         {!decision && dialogAlert}
         <Tag>{review?.result?.laneOutput.status}</Tag>
         <p>{review?.result?.laneOutput.summary}</p>
+        {!!review?.result?.laneOutput.findings?.length && (
+          <>
+            <h4>{t("authoring.findings")}</h4>
+            <ul className="gate-pins">
+              {review.result.laneOutput.findings.map((finding, index) => (
+                <li key={index}>
+                  <Tag>{t(`authoring.severity.${finding.severity}`)}</Tag>
+                  {finding.path && <code>{finding.path}</code>}
+                  <p>{finding.problem}</p>
+                  {finding.impact && <p>{finding.impact}</p>}
+                  {finding.claim && (
+                    <p>
+                      <code>{finding.claim}</code>
+                    </p>
+                  )}
+                  {finding.evidence?.map((entry, i) => (
+                    <p key={i}>{entry}</p>
+                  ))}
+                  <p>
+                    {format("authoring.owner", {
+                      owner:
+                        finding.owner ??
+                        (finding.evaluationCheck
+                          ? t("stage.evaluation")
+                          : t("authoring.engineer")),
+                    })}
+                  </p>
+                  {finding.fix && <p>{finding.fix}</p>}
+                  {finding.evaluationCheck && (
+                    <Link to={{ hash: "evaluation" }}>
+                      {format("authoring.evaluationCheck", {
+                        check: finding.evaluationCheck,
+                      })}
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        {canReviseSelected && <p>{t("authoring.requestRevisionHelp")}</p>}
+        {reviewFollowUp?.stage && (
+          <Link
+            to={followUpLocation(reviewFollowUp.jobId, reviewFollowUp)}
+            onClick={() => setReview(null)}
+          >
+            {format("authoring.openStageFinding", {
+              stage: t(stageLabels[reviewFollowUp.stage]),
+            })}
+          </Link>
+        )}
         <Collapse
           items={[
             {
@@ -492,7 +627,11 @@ export function WorkflowAuthoring({
                 <ul>
                   {review?.result?.laneOutput.claims?.map((claim) => (
                     <li key={claim.id}>
-                      <strong>{claim.id}</strong>: {claim.summary}
+                      <strong>{claim.id}</strong> · {claim.status}
+                      {claim.summary && <p>{claim.summary}</p>}
+                      {claim.evidence?.map((entry, index) => (
+                        <p key={index}>{entry}</p>
+                      ))}
                     </li>
                   ))}
                 </ul>
@@ -531,15 +670,19 @@ export function WorkflowAuthoring({
             description={review.result.laneOutput.action.requirement}
           />
         )}
-        <label className="field-label" htmlFor="authoring-rejection-reason">
-          {t("authoring.reason")}
-        </label>
-        <Input.TextArea
-          id="authoring-rejection-reason"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          maxLength={8000}
-        />
+        {canReviewSelected && (
+          <>
+            <label className="field-label" htmlFor="authoring-rejection-reason">
+              {t("authoring.reason")}
+            </label>
+            <Input.TextArea
+              id="authoring-rejection-reason"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={8000}
+            />
+          </>
+        )}
       </Modal>
       <Modal
         open={!!decision}
@@ -596,6 +739,10 @@ export function WorkflowAuthoring({
             ? t("authoring.accept")
             : t("authoring.reject")}
         </p>
+        {decision?.action === "accept" &&
+          decision.job.result?.laneOutput.findings?.some(
+            (finding) => finding.evaluationCheck,
+          ) && <p>{t("authoring.evaluationConfirm")}</p>}
         <code>{decision?.confirmationHash}</code>
       </Modal>
       <Modal

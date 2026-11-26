@@ -28,6 +28,8 @@ import { deriveAuthoringPlan } from "../src/authoring/plan.js";
 import type { CreatorState, FactoryPlan } from "../src/types.js";
 import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
 import { findSkills } from "../src/skill/find.js";
+import { evaluatePackage } from "../src/eval/run.js";
+import { reviewState } from "../src/publish/lifecycle.js";
 
 const recordAuthoring = (options: Parameters<typeof persistAuthoring>[0]) =>
   persistAuthoring({ ...options, confirmed: true });
@@ -903,6 +905,73 @@ describe("resumable authoring session", () => {
     ]);
     expect(readiness.nextLanes).toEqual(["workflow-entry", "skill-core"]);
     expect(readiness.state).toBe("blocked");
+  });
+
+  it("requires the exact deferred check before allowing package review", async () => {
+    const { state } = await createSession();
+    const completed = await runManualAuthoringFixture({ state });
+    const original = (await authoringReadiness(completed)).records;
+    const finding = {
+      severity: "minor" as const,
+      problem: "The assembled package needs its generated check.",
+      fix: "Run the generated package check on the assembled package.",
+      evaluationCheck: "assembled-package-check" as const,
+    };
+    await recordAuthoring({
+      state: completed,
+      lane: "script",
+      record: {
+        ...original.script!,
+        status: "DONE_WITH_CONCERNS",
+        findings: [finding],
+        summary: finding.problem,
+      },
+    });
+    const readiness = await authoringReadiness(completed);
+    expect(readiness.completedLanes).toContain("script");
+    expect(readiness.nextLanes).toContain("workflow-entry");
+    for (const lane of [
+      "workflow-entry",
+      "skill-core",
+      "skill-review",
+    ] as const) {
+      const record = original[lane]!;
+      const artifacts = await Promise.all(
+        record.artifacts.map(async ({ contentPath, ...artifact }) => ({
+          ...artifact,
+          ...(contentPath
+            ? { content: await fs.readFile(contentPath, "utf8") }
+            : {}),
+        })),
+      );
+      await recordAuthoring({
+        state: completed,
+        lane,
+        record: { ...record, artifacts },
+      });
+    }
+    const assembled = await assemblePackage(completed);
+    const report = await evaluatePackage(assembled, { persistState: false });
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({
+        id: expect.stringMatching(/^authoring-concern:script:/u),
+        passed: true,
+      }),
+    );
+    await fs.writeFile(
+      assembled.eval!.resultPath,
+      JSON.stringify({
+        ...report,
+        checks: report.checks.filter(
+          ({ id }) => !id.startsWith("authoring-concern:"),
+        ),
+      }),
+    );
+    expect(
+      reviewState(assembled, await authoringReadiness(assembled)).blockers,
+    ).toContainEqual(
+      expect.stringContaining("Evaluation is missing assembled-package-check"),
+    );
   });
 
   it("exposes persisted session decisions and confirmation gates through one gateway", async () => {

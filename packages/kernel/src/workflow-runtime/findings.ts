@@ -855,6 +855,15 @@ const blockerCatalog: Array<{
     },
   },
   {
+    match: /^Approval required for /u,
+    entry: {
+      code: "decision-required",
+      severity: "error",
+      requiredAction: "repair",
+      requiresUserDecision: true,
+    },
+  },
+  {
     match: /^Missing Output Schema artifacts:/u,
     entry: {
       code: "completion-missing-artifact",
@@ -1042,6 +1051,16 @@ const blockerCatalog: Array<{
       code: "verification-receipt-invalid",
       severity: "error",
       requiredAction: "stop",
+    },
+  },
+  {
+    match:
+      /^Workflow Verification Receipt has no valid pinned verifier signature:/u,
+    entry: {
+      code: "verification-receipt-invalid",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.submit",
     },
   },
   {

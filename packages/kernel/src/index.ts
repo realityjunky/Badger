@@ -45,3 +45,8 @@ export * from "./engine/index.js";
 export * from "./workflow-runtime/public.js";
 export * from "./authoring/index.js";
 export * from "./authoring/prompt-templates.js";
+
+export {
+  createWorkflowVerificationReceipt,
+  workflowVerifierSigningPayload,
+} from "./workflow-runtime/verification-receipts.js";

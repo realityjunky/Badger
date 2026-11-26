@@ -22,8 +22,11 @@ Review checks include:
 - Auto-zone ownership, package inventory, command paths, and package identity;
 - stale or missing input, authored-material, and assembled-package evidence.
 
-`DONE_WITH_CONCERNS`, Critical findings, Important findings, missing evidence,
-and stale hashes keep authoring readiness blocked until resolved.
+Unresolved concerns, Critical findings, Important findings, missing authoring
+evidence, and stale hashes keep authoring readiness blocked. An accepted
+`DONE_WITH_CONCERNS` lane can proceed when it meets complete-evidence validation
+and every finding names a supported Evaluation check. Evaluation records each
+required check against the accepted finding and exact assembled package hash.
 
 ## Deterministic evaluation
 

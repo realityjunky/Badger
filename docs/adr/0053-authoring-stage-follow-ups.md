@@ -22,6 +22,15 @@ The accepted result and follow-up commit together. Replaying the confirmation
 returns the same link. A lane with a stage follow-up waits for a new
 generation. A lane-local repair can still queue another job in that lane.
 
-A generated hook defect is a Badger bug. A lane can record the defect and the
-evidence needed to reproduce it. Badger waits for the fix without queuing
-another lane job. Changes to generated code require explicit regeneration.
+Follow-up ownership comes from the change the finding requires. A workflow
+rule targets its owning stage. A demonstrated Badger defect or missing
+capability names the affected area and the expected and observed behavior.
+Badger records that issue in Package and waits for the fix. Changes to
+generated code require explicit regeneration.
+
+Accepted lane reports remain readable. An Engineer can request a revised
+draft of a lane with open concerns. The new job pins the current lane revision,
+input snapshot, and outstanding findings. For a minor finding that an
+existing Evaluation check can resolve, the accepted report names that check.
+Complete authoring evidence still governs assembly. Package review requires
+the named check and the exact finding's result on the current assembled bytes.

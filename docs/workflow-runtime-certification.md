@@ -159,6 +159,24 @@ scope, snapshot, and candidate artifact drift makes a receipt stale without
 deleting its audit record. Decision Receipts remain a separate evidence family
 and may name exact Verification Receipt ids without substituting for them.
 
+An automated check may add `verification.verifierPin` with the expected
+executable `sha256` and an Ed25519 `publicKey` encoded as hexadecimal SPKI DER.
+In the trusted verifier, check that executable identity, then sign
+`workflowVerifierSigningPayload(pin, receipt)` for the normalized result and
+current Run binding. The verifier can construct the signing material with
+`createWorkflowVerificationReceipt` using the expected runtime scope and
+receipt policy. Supply the hexadecimal signature as `verifierSignature` on the
+proposal. WorkflowRuntime reconstructs the binding from the current action and
+verified artifacts, and accepts the result only if the signature verifies.
+Place the guardrail on a preceding verification Node when it must pass before
+a downstream command can start.
+
+A Node can list `approvalRequirements` covering a Decision ID, an approving
+choice and one or more required Run or Cycle artifact IDs. WorkflowRuntime
+checks the most recent Decision Receipt for the selected Node before entering
+it. The decision Attempt, producer Attempt, artifact version and bytes must
+still match when the Node is inspected or submits a result.
+
 The `repair-policy` capability requires the same revision fences, mutation locks,
 and transition journals plus bounded repair history and a hash-bound repair
 policy. Failed outcomes produce canonical signatures over protocol and execution

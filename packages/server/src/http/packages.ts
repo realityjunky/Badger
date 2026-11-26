@@ -1,3 +1,4 @@
+import { authoringLaneIds, type AuthoringLaneId } from "@realityjunky/badger";
 import { publicDraftingJob } from "../drafting/jobs.js";
 import {
   authoringView,
@@ -55,7 +56,7 @@ export async function handlePackage(input: AuthorizedRequest) {
         ? []
         : action === "assemble"
           ? ["confirmed", "confirmationHash", "requestId"]
-          : ["confirmed"],
+          : ["confirmed", "lane", "authoringRevision"],
     );
   }
   if (action === "generate") {
@@ -123,7 +124,19 @@ export async function handlePackage(input: AuthorizedRequest) {
           };
         if (authoringInput.confirmed !== true)
           throw new RequestError(400, "Confirm the Authoring action");
-        if (action === "authoring-jobs")
+        if (action === "authoring-jobs") {
+          const { lane, authoringRevision } = authoringInput;
+          if (
+            (lane !== undefined || authoringRevision !== undefined) &&
+            (typeof lane !== "string" ||
+              !authoringLaneIds().some((id) => id === lane) ||
+              !Number.isSafeInteger(authoringRevision) ||
+              Number(authoringRevision) < 1)
+          )
+            throw new RequestError(
+              400,
+              "Select a lane and its accepted report revision",
+            );
           return {
             jobs: (
               await requestLaneJobs(
@@ -133,9 +146,13 @@ export async function handlePackage(input: AuthorizedRequest) {
                 { ...input.context, agentHost: null },
                 workflowId,
                 versionId,
+                lane as AuthoringLaneId | undefined,
+                undefined,
+                authoringRevision as number | undefined,
               )
             ).map((j) => publicDraftingJob(j)),
           };
+        }
         if (
           typeof authoringInput.confirmationHash !== "string" ||
           typeof authoringInput.requestId !== "string" ||

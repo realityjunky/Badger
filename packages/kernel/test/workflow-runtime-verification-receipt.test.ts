@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -6,6 +7,7 @@ import {
   createWorkflowVerificationReceipt,
   parseWorkflowVerificationReceipt,
   workflowVerificationReceiptHash,
+  workflowVerifierSigningPayload,
 } from "../src/workflow-runtime/verification-receipts.js";
 import {
   projectWorkflowHandoff,
@@ -419,6 +421,106 @@ describe("Workflow Verification Receipt contract", () => {
       value.edges = [{ from: "finish", to: null, condition: "success" }];
       return value;
     }
+
+    it("only accepts a signed result for the pinned verifier and exact action", async () => {
+      const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+      const pin = {
+        sha256: "b".repeat(64),
+        publicKey: publicKey
+          .export({ format: "der", type: "spki" })
+          .toString("hex"),
+      };
+      const value = protocol();
+      value.nodes[0].guardrails[0].verification!.verifierPin = pin;
+      const runtime = createWorkflowRuntime();
+      const started = await runtime.start({
+        protocol: value,
+        runRoot,
+        runId: "pinned-verifier-run",
+      });
+      const context = {
+        runId: started.runId,
+        actionId: started.pendingAction!.id,
+        revision: started.revision,
+        nodeId: "check",
+        execution: started.execution,
+        attemptId: started.attemptId!,
+        cycleId: started.cycleId,
+      };
+      const proposal = {
+        kind: "automated-check" as const,
+        status: "passed" as const,
+        verifierSubject: "trusted-checker",
+        provider: "verified-fixture",
+        evidence: {
+          summary: "Checked fixture.",
+          outputHash: hash,
+          durationMs: 1,
+          truncated: false,
+        },
+      };
+      const result = {
+        ...context,
+        status: "succeeded" as const,
+        summary: "Verified fixture.",
+        verification: proposal,
+      };
+      const unsigned = await runtime.submit(runRoot, result);
+      expect(unsigned.disposition).toBe("blocked");
+      expect(unsigned.blockers.join(" ")).toContain(
+        "pinned verifier signature",
+      );
+      expect(unsigned.revision).toBe(started.revision);
+      const receipt = createWorkflowVerificationReceipt(
+        {
+          ...context,
+          proposal,
+          requirementId: "verified",
+          role: "workflow-check",
+          protocolHash: started.execution.protocolHash,
+          packageHash: started.execution.packageHash,
+          snapshotHash: started.execution.snapshotHash,
+          scope: { artifacts: [], evidence: [] },
+          contentSnapshotHash: null,
+        },
+        profile,
+      );
+      const signature = sign(
+        null,
+        workflowVerifierSigningPayload(pin, receipt),
+        privateKey,
+      ).toString("hex");
+      const wrongActionSignature = sign(
+        null,
+        workflowVerifierSigningPayload(pin, {
+          ...receipt,
+          actionId: "another-action",
+        }),
+        privateKey,
+      ).toString("hex");
+      const stale = await runtime.submit(runRoot, {
+        ...result,
+        verification: { ...proposal, verifierSignature: wrongActionSignature },
+      });
+      expect(stale.disposition).toBe("blocked");
+      const changedEvidence = await runtime.submit(runRoot, {
+        ...result,
+        verification: {
+          ...proposal,
+          evidence: { ...proposal.evidence, outputHash: "c".repeat(64) },
+          verifierSignature: signature,
+        },
+      });
+      expect(changedEvidence.disposition).toBe("blocked");
+      const advanced = await runtime.submit(runRoot, {
+        ...result,
+        verification: { ...proposal, verifierSignature: signature },
+      });
+      expect(advanced.currentNode).toBe("finish");
+      expect(
+        (await runtime.recover(runRoot)).verificationReceipts,
+      ).toHaveLength(1);
+    });
 
     it("requires and durably projects a passed receipt", async () => {
       const runtime = createWorkflowRuntime();

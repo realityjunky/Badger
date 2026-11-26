@@ -1,4 +1,8 @@
-import { withCertificationContext, type EvaluationSandbox } from "./sandbox.js";
+import {
+  certificationExecFile,
+  withCertificationContext,
+  type EvaluationSandbox,
+} from "./sandbox.js";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
@@ -7,7 +11,7 @@ import type {
   WorkflowProtocol,
   WorkflowMcpCertificationEvidence,
 } from "../types.js";
-import { hashDirectory, atomicWrite } from "../util.js";
+import { hashDirectory, atomicWrite, sha256 } from "../util.js";
 import { writeState } from "../factory/state.js";
 import { toProjectRelativePath } from "../factory/project-paths.js";
 import { certifyWorkflowRuntime } from "./workflow-runtime-certification.js";
@@ -20,6 +24,7 @@ import {
   readAuthoringPlan,
 } from "../authoring/lifecycle.js";
 import { crossValidateAuthoringPackage } from "../authoring/cross-validation.js";
+import { authoringEvaluationObligations } from "../authoring/concerns.js";
 
 export interface EvaluationOptions {
   /** Trusted host adapter, run inside the same bounded certification context. */
@@ -58,6 +63,7 @@ async function runEvaluation(
   const checks: EvalReport["checks"] = [];
   let mcp: WorkflowMcpCertificationEvidence | undefined;
   let authoringCrossValidation: EvalReport["authoringCrossValidation"];
+  let obligations: ReturnType<typeof authoringEvaluationObligations> = [];
   const protocolPath = state.generated.protocolPath;
   const protocol = JSON.parse(
     await fs.readFile(protocolPath, "utf8"),
@@ -131,6 +137,7 @@ async function runEvaluation(
       operation: "evaluate",
     });
     const authoring = authoringDecision.readiness;
+    obligations = authoringEvaluationObligations(authoring.records);
     const assembled =
       authoringDecision.allowed &&
       authoring.status === "assembled" &&
@@ -237,6 +244,49 @@ async function runEvaluation(
       });
     }
   }
+  if (obligations.some(({ check }) => check === "assembled-package-check")) {
+    const relative = "scripts/badger-check.mjs";
+    const script = path.join(root, relative);
+    try {
+      const inventoryEntry = state.generated.inventory?.find(
+        (entry) => entry.path === relative && entry.owner === "auto",
+      );
+      if (
+        !checks.find(({ id }) => id === "authoring-assembly")?.passed ||
+        !inventoryEntry ||
+        sha256(await fs.readFile(script)) !== inventoryEntry.sha256
+      )
+        throw new Error("The assembled package check script is unverified");
+      const { stdout } = await certificationExecFile(
+        process.execPath,
+        [script],
+        {
+          cwd: root,
+          env: { PATH: process.env.PATH },
+          timeout: 15_000,
+        },
+      );
+      checks.push({
+        id: "assembled-package-check",
+        passed: stdout.trim() === "badger-package-check-ok",
+        detail: relative,
+      });
+    } catch {
+      checks.push({
+        id: "assembled-package-check",
+        passed: false,
+        detail: "The generated assembled package check did not pass",
+      });
+    }
+  }
+  for (const obligation of obligations)
+    checks.push({
+      id: obligation.id,
+      passed: checks.some(
+        ({ id, passed }) => id === obligation.check && passed,
+      ),
+      detail: `Required check ${obligation.check} for ${obligation.detail}`,
+    });
   const passed = checks.every((check) => check.passed);
   const report: EvalReport = {
     schemaVersion: 1,

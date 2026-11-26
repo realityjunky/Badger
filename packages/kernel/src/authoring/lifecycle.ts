@@ -44,10 +44,13 @@ import {
   buildAuthoringReview,
   validateAuthoringReviewInput,
 } from "./review.js";
+import { concernsDeferredToEvaluation } from "./concerns.js";
+import { AUTHORING_EVALUATION_CHECKS } from "./types.js";
 import type {
   AuthoringArtifactEvidence,
   AuthoringArtifactInput,
   AuthoringClaimEvidence,
+  AuthoringLaneAction,
   AuthoringLaneFinding,
   AuthoringLaneReadiness,
   AuthoringLaneOutputStatus,
@@ -82,7 +85,7 @@ import type {
 } from "./types.js";
 import type { GeneratedPackage } from "../factory/generate.js";
 
-export const AUTHORING_GENERATOR_CONTRACT_VERSION = 3 as const;
+export const AUTHORING_GENERATOR_CONTRACT_VERSION = 4 as const;
 export const AUTHORING_INPUT_LIMIT_BYTES = 16 * 1024 * 1024;
 const MAX_SUMMARY_BYTES = 8 * 1024;
 const MAX_ARTIFACT_BYTES = 64 * 1024;
@@ -142,8 +145,14 @@ function isAuthoringLane(value: unknown): value is AuthoringLaneId {
   );
 }
 
-function isCompleteStatus(value: unknown): boolean {
-  return COMPLETE_STATUSES.includes(value as AuthoringStatus);
+function isCompleteRecord(
+  record?: Pick<AuthoringRecordInput, "status" | "findings" | "action">,
+): boolean {
+  return (
+    record !== undefined &&
+    (COMPLETE_STATUSES.includes(record.status) ||
+      concernsDeferredToEvaluation(record))
+  );
 }
 
 function portableSessionPath(workflow: string): string {
@@ -359,6 +368,11 @@ function canonicalRecord(record: AuthoringRecord): unknown {
             problem: finding.problem,
             ...(finding.impact ? { impact: finding.impact } : {}),
             ...(finding.fix ? { fix: finding.fix } : {}),
+            ...(finding.owner ? { owner: finding.owner } : {}),
+            ...(finding.evidence ? { evidence: [...finding.evidence] } : {}),
+            ...(finding.evaluationCheck
+              ? { evaluationCheck: finding.evaluationCheck }
+              : {}),
           })),
         }
       : {}),
@@ -443,10 +457,6 @@ function recordSummary(
     artifacts: record.artifacts.map((artifact) => artifact.path),
     findingCount: record.findings?.length ?? 0,
   };
-}
-
-function statusRequiresCompleteEvidence(status: AuthoringStatus): boolean {
-  return status === "COMPLETE" || status === "DONE";
 }
 
 function validRecordStatuses(): readonly AuthoringStatus[] {
@@ -1183,9 +1193,23 @@ function validateFindingList(value: unknown, label: string): string[] {
       if (item[field] !== undefined && !safeRelativePath(item[field]))
         findings.push(`${label}[${index}].${field} is invalid`);
     }
-    for (const field of ["impact", "fix"] as const) {
+    for (const field of ["impact", "fix", "owner"] as const) {
       if (item[field] !== undefined && !boundedText(item[field]))
         findings.push(`${label}[${index}].${field} is invalid`);
+    }
+    if (item.evidence !== undefined)
+      findings.push(
+        ...validateStringList(item.evidence, `${label}[${index}].evidence`),
+      );
+    if (
+      item.evaluationCheck !== undefined &&
+      (item.severity !== "minor" ||
+        !AUTHORING_EVALUATION_CHECKS.includes(item.evaluationCheck as never) ||
+        !boundedText(item.fix))
+    ) {
+      findings.push(
+        `${label}[${index}] needs a named Evaluation check and expected evidence for a minor finding`,
+      );
     }
   }
   return findings;
@@ -1324,6 +1348,13 @@ export function validateAuthoringRecord(
   if (record.summary !== undefined && !summaryWithinBounds(record.summary))
     findings.push("authoring record summary is missing or too large");
   const status = record.status as AuthoringStatus;
+  const complete = isCompleteRecord({
+    status,
+    findings: Array.isArray(record.findings)
+      ? (record.findings.filter(isRecord) as unknown as AuthoringLaneFinding[])
+      : [],
+    action: record.action as AuthoringRecordInput["action"],
+  });
   try {
     normalizeLaneAction(record.action, status, plan, laneValue);
   } catch (error) {
@@ -1396,7 +1427,7 @@ export function validateAuthoringRecord(
     if (claimValue.summary !== undefined && !boundedText(claimValue.summary))
       findings.push(`invalid summary for authoring claim: ${String(id)}`);
   }
-  if (statusRequiresCompleteEvidence(status)) {
+  if (complete) {
     for (const id of requiredClaimIds) {
       const claim = claims.find((item) => isRecord(item) && item.id === id);
       if (!claim) findings.push(`missing authoring claim: ${id}`);
@@ -1448,7 +1479,7 @@ export function validateAuthoringRecord(
     if (artifactValue.kind !== undefined && !boundedText(artifactValue.kind))
       findings.push(`authoring artifact kind is invalid: ${artifactPath}`);
     if (
-      statusRequiresCompleteEvidence(status) &&
+      complete &&
       allowedLeaves.has(artifactPath) &&
       artifactValue.present === true &&
       !HASH_PATTERN.test(String(artifactValue.contentHash))
@@ -1457,7 +1488,7 @@ export function validateAuthoringRecord(
         `complete authoring artifact has no content hash: ${artifactPath}`,
       );
   }
-  if (statusRequiresCompleteEvidence(status)) {
+  if (complete) {
     for (const leaf of lane.contentLeaves)
       if (!artifactPaths.has(leaf))
         findings.push(`missing authoring artifact: ${leaf}`);
@@ -1474,16 +1505,9 @@ export function validateAuthoringRecord(
   )
     findings.push(`${status} authoring records require a summary`);
   findings.push(
-    ...validateReview(
-      record.review,
-      lane.id === "skill-review" && statusRequiresCompleteEvidence(status),
-    ),
+    ...validateReview(record.review, lane.id === "skill-review" && complete),
   );
-  if (
-    lane.id === "skill-review" &&
-    isRecord(record.review) &&
-    statusRequiresCompleteEvidence(status)
-  ) {
+  if (lane.id === "skill-review" && isRecord(record.review) && complete) {
     findings.push(
       ...validateAuthoringReviewInput(
         record.review,
@@ -1525,15 +1549,11 @@ export function validateAuthoringRecord(
   }
   if (
     lane.id === "skill-review" &&
-    statusRequiresCompleteEvidence(status) &&
+    complete &&
     (!isRecord(record.review) || record.review.decision !== "approved")
   )
     findings.push("skill-review must have an approved authoring review");
-  if (
-    isRecord(record.review) &&
-    record.review.passed === false &&
-    statusRequiresCompleteEvidence(status)
-  )
+  if (isRecord(record.review) && record.review.passed === false && complete)
     findings.push("complete authoring record cannot have a failed review");
   if (HASH_PATTERN.test(String(record.authoredMaterialHash))) {
     try {
@@ -1563,6 +1583,16 @@ function normalizedFinding(
     problem: value.problem as string,
     ...(value.impact !== undefined ? { impact: value.impact as string } : {}),
     ...(value.fix !== undefined ? { fix: value.fix as string } : {}),
+    ...(value.owner !== undefined ? { owner: value.owner as string } : {}),
+    ...(value.evidence !== undefined
+      ? { evidence: [...(value.evidence as string[])] }
+      : {}),
+    ...(value.evaluationCheck !== undefined
+      ? {
+          evaluationCheck:
+            value.evaluationCheck as AuthoringLaneFinding["evaluationCheck"],
+        }
+      : {}),
   };
 }
 
@@ -1901,7 +1931,7 @@ function normalizeLaneAction(
   const kind =
     status === "NEEDS_CONTEXT"
       ? "question"
-      : status === "BLOCKED"
+      : status === "BLOCKED" || status === "DONE_WITH_CONCERNS"
         ? value.kind === "bug"
           ? "bug"
           : "repair"
@@ -1910,6 +1940,12 @@ function normalizeLaneAction(
     throw new Error("Authoring lane action does not match status");
   if (value.target !== undefined && kind !== "repair")
     throw new Error("Only a repair can target an upstream stage");
+  if (
+    value.area !== undefined &&
+    (kind !== "bug" ||
+      !["handoff", "generator", "runtime", "host"].includes(String(value.area)))
+  )
+    throw new Error("Only a Badger issue can specify a supported Badger area");
   if (kind === "question" && plan.semanticDossier) {
     const pointer = value.requirement as string;
     if (!pointer.startsWith("/") || pointer.includes("~"))
@@ -1929,6 +1965,9 @@ function normalizeLaneAction(
     kind,
     prompt: value.prompt as string,
     requirement: value.requirement as string,
+    ...(value.area === undefined
+      ? {}
+      : { area: value.area as AuthoringLaneAction["area"] }),
     ...(value.target === undefined
       ? {}
       : { target: normalizeRepairTarget(value.target, plan) }),
@@ -2076,7 +2115,7 @@ function validateNormalizedLaneInput(
     if (!expectedClaims(lane).includes(claim.id))
       findings.push(`unknown authoring claim: ${claim.id}`);
   }
-  if (statusRequiresCompleteEvidence(input.status)) {
+  if (isCompleteRecord(input)) {
     for (const claimId of expectedClaims(lane)) {
       const claim = claims.find((item) => item.id === claimId);
       if (!claim) findings.push(`missing authoring claim: ${claimId}`);
@@ -2092,7 +2131,7 @@ function validateNormalizedLaneInput(
     artifactPaths.add(artifact.path);
     if (!lane.contentLeaves.includes(artifact.path))
       findings.push(`unknown authoring artifact path: ${artifact.path}`);
-    if (statusRequiresCompleteEvidence(input.status)) {
+    if (isCompleteRecord(input)) {
       if (artifact.present !== true)
         findings.push(
           `complete authoring artifact is missing: ${artifact.path}`,
@@ -2115,7 +2154,7 @@ function validateNormalizedLaneInput(
         );
     }
   }
-  if (statusRequiresCompleteEvidence(input.status)) {
+  if (isCompleteRecord(input)) {
     for (const leaf of lane.contentLeaves)
       if (!artifactPaths.has(leaf))
         findings.push(`missing authoring artifact: ${leaf}`);
@@ -2123,7 +2162,7 @@ function validateNormalizedLaneInput(
   findings.push(
     ...validateReview(
       input.review,
-      laneId === "skill-review" && statusRequiresCompleteEvidence(input.status),
+      laneId === "skill-review" && isCompleteRecord(input),
     ),
   );
   return findings;
@@ -2492,9 +2531,7 @@ function reconcileRecordRevision(
 function summaryStatus(
   records: Partial<Record<AuthoringLaneId, AuthoringRecord>>,
 ): AuthoringSessionStatus {
-  if (
-    authoringLaneIds().every((lane) => isCompleteStatus(records[lane]?.status))
-  )
+  if (authoringLaneIds().every((lane) => isCompleteRecord(records[lane])))
     return "authored";
   return Object.keys(records).length ? "in-progress" : "pending";
 }
@@ -2920,7 +2957,7 @@ export async function recordAuthoring(options: {
     }
     for (const dependency of lane.dependencies) {
       const dependencyRecord = stored.records[dependency];
-      if (!dependencyRecord || !isCompleteStatus(dependencyRecord.status))
+      if (!dependencyRecord || !isCompleteRecord(dependencyRecord))
         throw new Error(
           `Authoring lane ${options.lane} is blocked by ${dependency}`,
         );
@@ -3355,7 +3392,7 @@ function waveReadiness(
   invalidated = new Set<AuthoringLaneId>(),
 ): AuthoringWaveReadiness {
   const completed = lanes.filter(
-    (lane) => !invalidated.has(lane) && isCompleteStatus(records[lane]?.status),
+    (lane) => !invalidated.has(lane) && isCompleteRecord(records[lane]),
   );
   const blocked: Partial<Record<AuthoringLaneId, string[]>> = {};
   for (const lane of lanes) {
@@ -3365,8 +3402,7 @@ function waveReadiness(
     const reasons = dependencies
       .filter(
         (dependency) =>
-          invalidated.has(dependency) ||
-          !isCompleteStatus(records[dependency]?.status),
+          invalidated.has(dependency) || !isCompleteRecord(records[dependency]),
       )
       .map((dependency) =>
         invalidated.has(dependency)
@@ -3377,7 +3413,10 @@ function waveReadiness(
     if (records[lane]?.status === "BLOCKED") reasons.push("lane is BLOCKED");
     if (records[lane]?.status === "NEEDS_CONTEXT")
       reasons.push("lane NEEDS_CONTEXT");
-    if (records[lane]?.status === "DONE_WITH_CONCERNS")
+    if (
+      records[lane]?.status === "DONE_WITH_CONCERNS" &&
+      !isCompleteRecord(records[lane])
+    )
       reasons.push("lane has concerns");
     if (reasons.length) blocked[lane] = reasons;
   }
@@ -3669,16 +3708,17 @@ export async function authoringReadiness(
     }
     if (record.status === "DONE_WITH_CONCERNS") {
       warnings.push(`Authoring lane has concerns: ${laneId}`);
-      blockers.push(`Authoring lane requires review of concerns: ${laneId}`);
+      if (!isCompleteRecord(record))
+        blockers.push(`Authoring lane requires review of concerns: ${laneId}`);
     }
-    if (!isCompleteStatus(record.status))
+    if (!isCompleteRecord(record))
       blockers.push(`Authoring lane is not complete: ${laneId}`);
     for (const dependency of lane.dependencies) {
       const dependencyRecord = stored.records[dependency];
       if (
         !dependencyRecord ||
         invalidated.has(dependency) ||
-        !isCompleteStatus(dependencyRecord.status)
+        !isCompleteRecord(dependencyRecord)
       )
         blockers.push(
           `Authoring lane ${laneId} is blocked by${
@@ -3721,8 +3761,7 @@ export async function authoringReadiness(
     }
   }
   const allRecordsComplete = authoringLaneIds().every(
-    (lane) =>
-      !invalidated.has(lane) && isCompleteStatus(stored.records[lane]?.status),
+    (lane) => !invalidated.has(lane) && isCompleteRecord(stored.records[lane]),
   );
   let review: AuthoringReviewResult | undefined;
   if (allRecordsComplete && blockers.length === 0) {
@@ -3767,19 +3806,18 @@ export async function authoringReadiness(
     if (
       stored.records[lane] &&
       !invalidated.has(lane) &&
-      isCompleteStatus(stored.records[lane]!.status)
+      isCompleteRecord(stored.records[lane])
     )
       return false;
     return laneDefinition(plan, lane).dependencies.every(
       (dependency) =>
         !invalidated.has(dependency) &&
-        isCompleteStatus(stored.records[dependency]?.status),
+        isCompleteRecord(stored.records[dependency]),
     );
   });
   const ready = blockers.length === 0 && allRecordsComplete;
   const completedLanes = authoringLaneIds().filter(
-    (lane) =>
-      !invalidated.has(lane) && isCompleteStatus(stored.records[lane]?.status),
+    (lane) => !invalidated.has(lane) && isCompleteRecord(stored.records[lane]),
   );
   const lanes = readinessLanes(
     plan,

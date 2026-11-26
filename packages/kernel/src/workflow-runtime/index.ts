@@ -171,6 +171,7 @@ import {
   workflowContentSnapshotFindings,
 } from "./snapshots.js";
 import {
+  assertWorkflowVerifierSignature,
   createWorkflowVerificationReceipt,
   normalizeWorkflowVerificationProposal,
   readWorkflowVerificationReceipt,
@@ -343,6 +344,7 @@ import type {
   Submission,
   WorkflowSubmission,
 } from "./types.js";
+import { workflowApprovalBlockers } from "./approval-requirements.js";
 
 export type {
   ManualWorkflowRunLocation,
@@ -540,6 +542,7 @@ interface ResolvedWorkflowVerificationRequirement {
     evidence: Array<{ id: string; required: boolean }>;
   };
   requireContentSnapshot: boolean;
+  verifierPin?: import("../types.js").WorkflowVerifierPin;
 }
 
 interface NormalizedVerificationSubmission {
@@ -580,6 +583,7 @@ function verificationRequirements(
         })),
       },
       requireContentSnapshot: requirement.requireContentSnapshot === true,
+      verifierPin: requirement.verifierPin,
     });
   }
   return result;
@@ -2649,6 +2653,7 @@ async function verifyStoredVerificationReceipts(
         `WorkflowRuntime verification receipt context is invalid: ${reference.receiptId}`,
       );
     }
+    assertWorkflowVerifierSignature(requirement.verifierPin, receipt);
   }
 }
 
@@ -3402,7 +3407,32 @@ async function continuationFromVerifiedRun(
         snapshotFindings.push(...workflowContentSnapshotFindings(snapshot));
     }
   }
-  return withAdditionalFindings(base, snapshotFindings);
+  const approvals =
+    base.currentNode &&
+    !base.pendingAction?.repair &&
+    !base.pendingAction?.finalization &&
+    base.pendingAction
+      ? await workflowApprovalBlockers(
+          runRoot,
+          verified.package.runtime!.protocol,
+          verified.identity.nodeToStep,
+          base.currentNode,
+          verified.state.workflowRuntime,
+        )
+      : [];
+  return withAdditionalFindings(
+    base,
+    [
+      ...snapshotFindings,
+      ...approvals.map((blocker) =>
+        findingFromBlocker(blocker, {
+          actionId: verified.pending?.id,
+          nodeId: base.currentNode,
+        }),
+      ),
+    ],
+    approvals.length ? "blocked" : base.disposition,
+  );
 }
 
 /**
@@ -4506,11 +4536,11 @@ async function validateCompletion(
   );
 }
 
-function routeBlockers(
+async function routeBlockers(
   prepared: PreparedWorkflowSubmission,
   submission: WorkflowSubmission,
   artifactMutation?: WorkflowArtifactMutation,
-): string[] {
+): Promise<string[]> {
   const protocol = prepared.verified.package.runtime!.protocol;
   if (
     isWorkflowRepairAction(prepared.pending) ||
@@ -4524,15 +4554,39 @@ function routeBlockers(
   ) {
     return [];
   }
+  const approvalArguments = [
+    prepared.location.runRoot,
+    protocol,
+    prepared.verified.identity.nodeToStep,
+  ] as const;
+  const state = prepared.verified.state;
+  const current = await workflowApprovalBlockers(
+    ...approvalArguments,
+    prepared.node,
+    state.workflowRuntime,
+  );
+  if (current.length) return current;
   try {
-    resolveWorkflowTransition(
+    const outcome = engineOutcome(prepared, submission, artifactMutation);
+    const resolved = resolveWorkflowTransition(
       protocol,
       prepared.node,
-      engineOutcome(prepared, submission, artifactMutation),
-      prepared.verified.state.workflowRuntime,
-      prepared.verified.state.runId,
+      outcome,
+      state.workflowRuntime,
+      state.runId,
     );
-    return [];
+    const nextRuntime = workflowStateWithArtifactMutation(
+      state,
+      artifactMutation,
+    ).workflowRuntime;
+    return workflowApprovalBlockers(
+      ...approvalArguments,
+      resolved.next,
+      nextRuntime && resolved.workflowRuntime
+        ? { ...nextRuntime, ...resolved.workflowRuntime }
+        : nextRuntime,
+      outcome,
+    );
   } catch (error) {
     if (error instanceof WorkflowRouteResolutionError) {
       return error.blockers;
@@ -4739,6 +4793,7 @@ async function validateCurrentVerificationReceipt(
   ) {
     throw new Error(verificationFailure(`is stale: ${receipt.receiptId}`));
   }
+  assertWorkflowVerifierSignature(requirement.verifierPin, receipt);
   for (const artifact of scope.artifacts) {
     const version = runtime?.artifactVersions.find(
       (candidate) => candidate.id === artifact.versionId,
@@ -4998,6 +5053,7 @@ async function verificationMutationForSubmission(
           },
           profile,
         );
+        assertWorkflowVerifierSignature(requirement.verifierPin, receipt);
         const reference = workflowVerificationReceiptReference(receipt);
         mutation.verificationReceipts!.push(reference);
         mutation.verificationReceiptRecords!.push(receipt);
@@ -5517,7 +5573,7 @@ export async function validateWorkflowSubmission(
     if (completion.blockers.length > 0) {
       return blockedContinuation(prepared, completion.blockers);
     }
-    const routeFindings = routeBlockers(prepared, submission, mutation);
+    const routeFindings = await routeBlockers(prepared, submission, mutation);
     if (routeFindings.length > 0) {
       return blockedContinuation(prepared, routeFindings);
     }
@@ -6785,7 +6841,11 @@ export function createWorkflowRuntime(): WorkflowRuntime {
             if (completion.blockers.length > 0) {
               return blockedContinuation(prepared, completion.blockers);
             }
-            const routeFindings = routeBlockers(prepared, submission, mutation);
+            const routeFindings = await routeBlockers(
+              prepared,
+              submission,
+              mutation,
+            );
             if (routeFindings.length > 0) {
               return blockedContinuation(prepared, routeFindings);
             }

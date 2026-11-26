@@ -8,7 +8,8 @@ does not write Badger state or the package directly.
 ## Common handoff
 
 Every handoff contains the confirmed goal, workflow name, normalized
-`WorkflowProtocol`, resolved source summary, the lane's role brief, and the
+`WorkflowProtocol`, resolved source summary, the lane's role brief, this shared
+brief, and the
 hashes needed to identify those inputs. A worker receives only the paths and
 bounded context required for its lane. It returns one JSON envelope with:
 
@@ -34,7 +35,21 @@ Keep claims, artifacts, and status in separate lane envelopes, whether workers r
 
 Wave 1 `NEEDS_CONTEXT` outputs require an `action` with `kind: "question"`, a targeted `prompt`, and `requirement` identifying an existing dossier field with a JSON pointer such as `/topics/recoveryPolicy`. Explain the missing or ambiguous detail in the summary. The main session asks that question, obtains confirmation of the repaired dossier, regenerates the session, and reauthors invalidated lanes. Resolved facts remain authoritative.
 
-Wave 1 `BLOCKED` outputs require an `action` with `kind: "repair"`, a concrete `requirement` naming the missing dependency or repair, and a `prompt` explaining the next main-session action. Both statuses persist their actions in lane readiness and prevent dependent lanes from dispatching. Independent lanes may continue. Retry against the current input identity and revision after repair.
+Wave 1 `BLOCKED` outputs require an `action`, a concrete `requirement`, and a
+`prompt` explaining the next action. Use a repair with a stage target for a
+workflow input and a repair without a target for lane-local work. For a defect
+or missing capability owned by Badger, use `kind: "bug"` and identify the
+handoff, generator, runtime, or host area and the evidence. Independent lanes
+may continue. Retry against the current input identity and revision after repair.
+
+Use `DONE_WITH_CONCERNS` when an issue remains after drafting. Record the owner,
+evidence, and next action for each finding. A minor concern that an existing
+Evaluation check can fully resolve may name that check in `evaluationCheck`.
+A lane can unlock dependents after acceptance when all its findings are deferred
+this way and its required claims and artifacts validate. The exact checks must
+pass for that assembled package before publication. A concern about a missing
+authoring input, missing claim evidence, or a workflow-specific behavior outside
+the check's coverage stays open for repair.
 
 ## Lane responsibilities
 

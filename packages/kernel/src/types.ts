@@ -192,6 +192,13 @@ export interface WorkflowVerificationRequirement {
   kind: WorkflowVerificationKind | WorkflowVerificationKind[];
   scope?: WorkflowDecisionScope;
   requireContentSnapshot?: boolean;
+  verifierPin?: WorkflowVerifierPin;
+}
+
+export interface WorkflowVerifierPin {
+  sha256: string;
+  /** Ed25519 public key in lowercase hexadecimal SPKI DER. */
+  publicKey: string;
 }
 
 export interface WorkflowVerificationArtifactReference {
@@ -237,6 +244,7 @@ export interface WorkflowVerificationReceipt extends WorkflowVerificationReceipt
   kind: "workflow-verification-receipt";
   scope: WorkflowDecisionScopeSnapshot;
   evidence: WorkflowVerificationEvidence;
+  verifierSignature?: string;
 }
 
 export interface WorkflowVerificationReceiptProposal {
@@ -256,11 +264,19 @@ export interface WorkflowVerificationReceiptProposal {
   outputHash?: string;
   durationMs?: number;
   truncated?: boolean;
+  verifierSignature?: string;
 }
 
 export interface WorkflowVerificationSubmission {
   proposals?: WorkflowVerificationReceiptProposal[];
   receiptIds?: string[];
+}
+
+/** Requires a current, artifact-scoped human decision before this Node runs. */
+export interface WorkflowApprovalRequirement {
+  decisionId: string;
+  choiceId: string;
+  artifacts: WorkflowArtifactId[];
 }
 
 export interface NodeTemplate {
@@ -281,6 +297,7 @@ export interface NodeTemplate {
   outputSchemas: string[];
   guardrails: Guardrail[];
   decision?: WorkflowDecisionDefinition;
+  approvalRequirements?: WorkflowApprovalRequirement[];
 }
 
 export interface NodePatch {

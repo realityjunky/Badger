@@ -144,6 +144,14 @@ After a successful initialization, continue to **Package**.
    again as accepted results unlock dependent lanes. When all required results
    are current, confirm **Assemble package**, then request evaluation.
 
+Use **View report** on an accepted lane or an earlier attempt to read the
+summary, claims, findings and evidence. A finding can link to its owning
+workflow stage or to **Evaluation**. An Engineer can choose **Request revised
+draft** on the current report after addressing open lane concerns. The new job
+receives the findings with its current inputs. The Engineer's acceptance can
+assign minor concerns to named Evaluation checks when the authoring evidence
+is complete. Those checks must pass before package review.
+
 Open **Authoring plan** to check each lane's wave and dependencies. **Package**
 shows the latest generated package for the selected Workflow version. Each
 version can have one current package. Regeneration keeps the earlier package

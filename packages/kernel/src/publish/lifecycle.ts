@@ -25,6 +25,7 @@ import { WORKFLOW_FINALIZATION_BOUNDARY_PHASES } from "../workflow-runtime/final
 import { WORKFLOW_TRANSITION_BOUNDARY_PHASES } from "../workflow-runtime/transition-journal.js";
 import { validateAuthoringReviewResult } from "../authoring/review.js";
 import { authoringSessionGateway } from "../authoring/lifecycle.js";
+import { authoringEvaluationObligations } from "../authoring/concerns.js";
 import type { AuthoringReadiness } from "../authoring/types.js";
 import { hashDirectorySync } from "../workflow-kernel/hash.js";
 import { hashSkillSourceSync } from "../skill/identity.js";
@@ -168,7 +169,10 @@ interface EvaluationEvidenceCheck {
   blockers: string[];
 }
 
-function evaluationEvidenceCheck(state: CreatorState): EvaluationEvidenceCheck {
+function evaluationEvidenceCheck(
+  state: CreatorState,
+  authoring?: AuthoringReadiness,
+): EvaluationEvidenceCheck {
   const evaluation = state.eval;
   if (!evaluation) return { reportHash: null, blockers: [] };
   if (!isWithin(state.projectRoot, evaluation.resultPath)) {
@@ -214,6 +218,18 @@ function evaluationEvidenceCheck(state: CreatorState): EvaluationEvidenceCheck {
     }
     if (report.schemaVersion !== 1) {
       blockers.push("Evaluation evidence schema is invalid");
+    }
+    if (authoring && Array.isArray(report.checks)) {
+      const passingChecks = new Set(
+        report.checks
+          .filter((check) => isRecord(check) && check.passed === true)
+          .map((check) => check.id),
+      );
+      for (const { id, check, detail } of authoringEvaluationObligations(
+        authoring.records,
+      ))
+        if (!passingChecks.has(id) || !passingChecks.has(check))
+          blockers.push(`Evaluation is missing ${check} for ${detail}`);
     }
     if (report.hash !== evaluation.hash) {
       blockers.push(
@@ -1044,7 +1060,7 @@ export function reviewState(
   const runtimeBlockers: string[] = [];
   const packageHash = currentPackageHashCheck(state);
   const sourceEvidence = sourceEvidenceCheck(state);
-  const evaluation = evaluationEvidenceCheck(state);
+  const evaluation = evaluationEvidenceCheck(state, sessionReadiness);
   if (state.candidates.some((candidate) => candidate.status !== "available"))
     blockers.push("Unresolved Skill candidates remain");
   if (!state.generated) blockers.push("Generated package is missing");
@@ -1225,7 +1241,7 @@ export async function approveReview(options: {
     );
   const packageHash = currentPackageHashCheck(options.state);
   const sourceEvidence = sourceEvidenceCheck(options.state);
-  const evaluation = evaluationEvidenceCheck(options.state);
+  const evaluation = evaluationEvidenceCheck(options.state, authoring);
   const approvalEvidence = publicationReadinessEvidence(
     options.state,
     readiness,

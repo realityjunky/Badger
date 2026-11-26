@@ -236,7 +236,19 @@ export interface AuthoringLaneFinding {
   problem: string;
   impact?: string;
   fix?: string;
+  owner?: string;
+  evidence?: string[];
+  evaluationCheck?: AuthoringEvaluationCheck;
 }
+
+export const AUTHORING_EVALUATION_CHECKS = [
+  "assembled-package-check",
+  "workflow-runtime-certification",
+  "mcp-runtime-certification",
+] as const;
+
+export type AuthoringEvaluationCheck =
+  (typeof AUTHORING_EVALUATION_CHECKS)[number];
 
 export interface AuthoringReviewFinding extends AuthoringLaneFinding {
   lens?: AuthoringReviewLens;
@@ -352,6 +364,7 @@ export interface AuthoringLaneAction {
   prompt: string;
   requirement: string;
   target?: AuthoringRepairTarget;
+  area?: "handoff" | "generator" | "runtime" | "host";
 }
 
 export interface AuthoringLaneOutput {
@@ -519,7 +532,7 @@ export interface AuthoringStateSummary {
   planPath: string;
   recordsPath: string;
   revision: number;
-  generatorContractVersion: 1 | 2 | 3;
+  generatorContractVersion: 1 | 2 | 3 | 4;
   planHash: string;
   protocolHash: string;
   workflowProtocolHash: string;

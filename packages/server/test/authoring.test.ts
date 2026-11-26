@@ -162,6 +162,91 @@ it("reports Markdown findings for both pause-points leaves before handoff and re
   expect(claim.instructions).toContain("## Drift Handling");
 });
 
+it("retains concern details and requests a revision with the fixed handoff", async () => {
+  const fixture = await generated();
+  const { call, base } = fixture;
+  const { jobs } = await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    { confirmed: true },
+    engineer,
+    201,
+  );
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "script author", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const finding = {
+    severity: "minor",
+    problem: "The previous handoff omitted its shared brief.",
+    path: "reference/authoring-subagents.md",
+    owner: "Badger handoff",
+    fix: "Read the shared brief from the revised handoff.",
+  };
+  const script = jobs.find((job: any) => job.laneId === "script");
+  await acceptLane(fixture, secret, script, (context) => ({
+    ...reportLaneOutput(context),
+    status: "DONE_WITH_CONCERNS",
+    findings: [finding],
+  }));
+  const view = await call(`${base}/package/authoring`);
+  const record = view.readiness.records.script;
+  expect(record.findings).toEqual([finding]);
+  expect(view.readiness.completedLanes).not.toContain("script");
+  const revised = {
+    confirmed: true,
+    lane: "script",
+    authoringRevision: record.revision,
+  };
+  await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    {
+      ...revised,
+      authoringRevision: record.revision + 1,
+    },
+    engineer,
+    409,
+  );
+  const {
+    jobs: [retry],
+  } = await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    revised,
+    engineer,
+    201,
+  );
+  const claimed = await call(
+    `${base}/drafting-jobs/${retry.id}/claim`,
+    "POST",
+    { revision: retry.revision },
+    engineer,
+    200,
+    secret,
+  );
+  const bundle = claimed.contextBundle.authoring;
+  expect(bundle.priorFindings).toEqual([finding]);
+  const shared = bundle.files.find(
+    (file: { path: string }) => file.path === bundle.handoff.sharedBriefPath,
+  );
+  expect(shared.text).toContain("# Authoring Handoffs");
+  expect(createHash("sha256").update(shared.text).digest("hex")).toBe(
+    shared.hash,
+  );
+  const duplicate = await call(
+    `${base}/package/authoring-jobs`,
+    "POST",
+    revised,
+    engineer,
+    201,
+  );
+  expect(duplicate.jobs).toEqual([]);
+});
+
 it("opens one plan draft from a confirmed lane blocker without changing the current plan", async () => {
   const fixture = await generated();
   const { call, base } = fixture;
@@ -215,6 +300,7 @@ it("opens one plan draft from a confirmed lane blocker without changing the curr
     summary: "The generated hook used the stale compatibility projection.",
     action: {
       kind: "bug",
+      area: "generator",
       requirement: "Read the current WorkflowRuntime action.",
       prompt:
         "Compare hook output while the compatibility projection is stale.",

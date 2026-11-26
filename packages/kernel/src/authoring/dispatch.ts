@@ -39,6 +39,7 @@ export interface AuthoringHandoff {
   workflow: string;
   lane: AuthoringLaneId;
   roleBriefPath: string;
+  sharedBriefPath: string;
   inputPaths: string[];
   commonInputPath: string;
   confirmedProposal: { path: string; hash: string; limitBytes: number };
@@ -479,8 +480,12 @@ export async function buildAuthoringHandoff(
     throw new Error("Authoring provider output path is too long");
   const packageRoot = options.state.generated.packageRoot;
   const roleBriefPath = await resolveRoleBrief(packageRoot, lane.brief);
+  const sharedBriefPath = await resolvePackageAsset(
+    "reference/authoring-subagents.md",
+  );
   const baseInputPaths = [
     roleBriefPath,
+    sharedBriefPath,
     authoringPlanPath(options.state),
     path.join(packageRoot, "reference", "workflow-protocol.json"),
     path.join(packageRoot, "reference", "resolved-skills.json"),
@@ -590,6 +595,8 @@ export async function buildAuthoringHandoff(
         workflow: plan.name,
         lane: options.lane,
         inputPaths: handoffInputPaths,
+        roleBriefPath,
+        sharedBriefPath,
         goal: options.state.confirmedProposal?.goal ?? "",
         confirmedProposal,
         upstreamRecords,
@@ -627,6 +634,7 @@ export async function buildAuthoringHandoff(
     workflow: plan.name,
     lane: options.lane,
     roleBriefPath,
+    sharedBriefPath,
     inputPaths: handoffInputPaths,
     commonInputPath: commonPath,
     confirmedProposal,

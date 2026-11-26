@@ -1367,6 +1367,15 @@ var blockerCatalog = [
     }
   },
   {
+    match: /^Approval required for /u,
+    entry: {
+      code: "decision-required",
+      severity: "error",
+      requiredAction: "repair",
+      requiresUserDecision: true
+    }
+  },
+  {
     match: /^Missing Output Schema artifacts:/u,
     entry: {
       code: "completion-missing-artifact",
@@ -1551,6 +1560,15 @@ var blockerCatalog = [
       code: "verification-receipt-invalid",
       severity: "error",
       requiredAction: "stop"
+    }
+  },
+  {
+    match: /^Workflow Verification Receipt has no valid pinned verifier signature:/u,
+    entry: {
+      code: "verification-receipt-invalid",
+      severity: "error",
+      requiredAction: "repair",
+      operationId: "workflow.submit"
     }
   },
   {
@@ -12683,6 +12701,7 @@ async function clearPendingAction(changeDir, relativePath2, options = {}) {
 import path12 from "path";
 
 // src/workflow-runtime/verification-receipts.ts
+import { createPublicKey, verify } from "node:crypto";
 var WORKFLOW_VERIFICATION_RECEIPT_DIRECTORY = ".badger/verification-receipts";
 var WORKFLOW_VERIFICATION_RECEIPT_SCHEMA_VERSION = 1;
 var WORKFLOW_VERIFICATION_RECEIPT_MAX_SCOPE_ENTRIES = 64;
@@ -12722,7 +12741,12 @@ var RECEIPT_REFERENCE_KEYS = /* @__PURE__ */ new Set([
   "evidenceHash",
   "truncated"
 ]);
-var RECEIPT_KEYS = /* @__PURE__ */ new Set([...RECEIPT_REFERENCE_KEYS, "scope", "evidence"]);
+var RECEIPT_KEYS = /* @__PURE__ */ new Set([
+  ...RECEIPT_REFERENCE_KEYS,
+  "scope",
+  "evidence",
+  "verifierSignature"
+]);
 var EVIDENCE_KEYS = /* @__PURE__ */ new Set([
   "summary",
   "outputHash",
@@ -12765,7 +12789,14 @@ function validateWorkflowVerificationRequirement(value, label = "Workflow verifi
   if (!isRecord8(value)) throw new Error(`${label} must be an object`);
   assertKnownFields6(
     value,
-    /* @__PURE__ */ new Set(["id", "role", "kind", "scope", "requireContentSnapshot"]),
+    /* @__PURE__ */ new Set([
+      "id",
+      "role",
+      "kind",
+      "scope",
+      "requireContentSnapshot",
+      "verifierPin"
+    ]),
     label
   );
   if (value.id !== void 0 && (typeof value.id !== "string" || value.id.length === 0 || Buffer.byteLength(value.id, "utf8") > MAX_IDENTIFIER_BYTES || /[\u0000\r\n]/u.test(value.id))) {
@@ -12774,9 +12805,17 @@ function validateWorkflowVerificationRequirement(value, label = "Workflow verifi
   if (typeof value.role !== "string" || value.role.length === 0 || Buffer.byteLength(value.role, "utf8") > MAX_IDENTIFIER_BYTES || /[\u0000\r\n]/u.test(value.role)) {
     throw new Error(`${label}.role must be a non-empty string`);
   }
-  workflowVerificationKinds(
+  const kinds = workflowVerificationKinds(
     value
   );
+  if (value.verifierPin !== void 0) {
+    const pin = value.verifierPin;
+    if (kinds.length !== 1 || kinds[0] !== "automated-check" || !isRecord8(pin) || Object.keys(pin).length !== 2 || typeof pin.sha256 !== "string" || !HASH_PATTERN4.test(pin.sha256) || typeof pin.publicKey !== "string" || !/^302a300506032b6570032100[a-f0-9]{64}$/u.test(pin.publicKey)) {
+      throw new Error(
+        `${label}.verifierPin requires an automated check, executable SHA-256 and Ed25519 public key`
+      );
+    }
+  }
   if (value.requireContentSnapshot !== void 0 && typeof value.requireContentSnapshot !== "boolean") {
     throw new Error(`${label}.requireContentSnapshot must be a boolean`);
   }
@@ -13041,11 +13080,51 @@ function receiptIdentityMaterial(receipt) {
     verifierSubject: receipt.verifierSubject,
     provider: receipt.provider,
     evidenceHash: receipt.evidenceHash,
-    truncated: receipt.truncated
+    truncated: receipt.truncated,
+    ...receipt.verifierSignature ? { verifierSignature: receipt.verifierSignature } : {}
   };
 }
 function workflowVerificationReceiptHash(receipt) {
   return sha256(JSON.stringify(stableValue(receiptIdentityMaterial(receipt))));
+}
+function workflowVerifierSigningPayload(pin, receipt) {
+  const {
+    issuedAt: _issuedAt,
+    verifierSignature: _signature,
+    ...binding
+  } = receiptIdentityMaterial(receipt);
+  return Buffer.from(
+    JSON.stringify(
+      stableValue({
+        kind: "badger-workflow-verifier-result-v1",
+        verifierSha256: pin.sha256,
+        ...binding
+      })
+    )
+  );
+}
+function assertWorkflowVerifierSignature(pin, receipt) {
+  if (!pin && !receipt.verifierSignature) return;
+  if (pin && receipt.verifierSignature && verify(
+    null,
+    workflowVerifierSigningPayload(pin, receipt),
+    createPublicKey({
+      key: Buffer.from(pin.publicKey, "hex"),
+      format: "der",
+      type: "spki"
+    }),
+    Buffer.from(receipt.verifierSignature, "hex")
+  ))
+    return;
+  throw new Error(
+    `${RECEIPT_LABEL} has no valid pinned verifier signature: ${receipt.requirementId}`
+  );
+}
+function signatureField(value, label) {
+  if (value === void 0) return {};
+  if (typeof value !== "string" || !/^[a-f0-9]{128}$/u.test(value))
+    throw new Error(`Invalid ${label}: verifierSignature is invalid`);
+  return { verifierSignature: value };
 }
 function receiptId(hash4) {
   return `verification-receipt-${hash4.slice(0, 24)}`;
@@ -13061,6 +13140,7 @@ function referenceFromReceipt(receipt) {
     kind: _kind,
     scope: _scope,
     evidence: _evidence,
+    verifierSignature: _signature,
     ...fields
   } = receipt;
   return {
@@ -13143,6 +13223,7 @@ function parseWorkflowVerificationReceipt(value, profile) {
     issuedAt: timestamp2(value.issuedAt, "issuedAt", label),
     evidenceHash: hashValue3(value.evidenceHash, "evidenceHash", label),
     truncated: value.truncated,
+    ...signatureField(value.verifierSignature, label),
     scope,
     evidence
   };
@@ -13294,7 +13375,8 @@ function normalizeWorkflowVerificationProposal(value, profile) {
       "summary",
       "outputHash",
       "durationMs",
-      "truncated"
+      "truncated",
+      "verifierSignature"
     ]),
     label
   );
@@ -13374,6 +13456,7 @@ function normalizeWorkflowVerificationProposal(value, profile) {
     ...contentSnapshotHash !== void 0 ? { contentSnapshotHash } : {},
     verifierSubject: identityText(verifierSubject, "verifierSubject", label),
     provider: identityText(provider, "provider", label),
+    ...signatureField(value.verifierSignature, label),
     evidence: normalizedEvidence
   };
 }
@@ -13417,6 +13500,7 @@ function createWorkflowVerificationReceipt(options, profile) {
     issuedAt: (options.now ?? /* @__PURE__ */ new Date()).toISOString(),
     evidenceHash: evidenceHash(evidence),
     truncated: evidence.truncated,
+    ...signatureField(proposal.verifierSignature, RECEIPT_LABEL),
     scope,
     evidence
   };
@@ -16850,6 +16934,103 @@ function resolverHash(protocol) {
   );
 }
 
+// src/workflow-runtime/approval-requirements.ts
+function approvalRequirementProblems(nodes, schemas) {
+  const artifacts = new Map(
+    schemas.flatMap(
+      (schema) => schema.artifacts.map(
+        (artifact) => [`${schema.id}.${artifact.id}`, artifact]
+      )
+    )
+  );
+  const active = nodes.filter((node) => !node.disabled);
+  const problems = [];
+  for (const node of active) {
+    if (node.approvalRequirements === void 0) continue;
+    const report = (message) => problems.push({ nodeId: node.id, message: `${node.id}: ${message}` });
+    const requirements = node.approvalRequirements;
+    if (!Array.isArray(requirements) || !requirements.length || requirements.length > 32) {
+      report("approvalRequirements must list one to 32 scoped decisions");
+      continue;
+    }
+    if (node === active[0])
+      report("the entry Node cannot require a prior approval");
+    const seen = /* @__PURE__ */ new Set();
+    for (const requirement of requirements) {
+      const reviewer = active.find(
+        (candidate) => candidate.kind === "decision" && candidate.decision?.id === requirement?.decisionId
+      );
+      const decision = reviewer?.decision;
+      if (!requirement || typeof requirement !== "object" || Object.keys(requirement).some(
+        (key) => !["decisionId", "choiceId", "artifacts"].includes(key)
+      ) || !decision || reviewer === node || seen.has(requirement.decisionId) || !decision.choices.some((choice) => choice.id === requirement.choiceId)) {
+        report(
+          "an approval must name an active prior Decision and its declared choice once"
+        );
+        continue;
+      }
+      seen.add(requirement.decisionId);
+      if (!Array.isArray(requirement.artifacts) || !requirement.artifacts.length || requirement.artifacts.length > 32 || new Set(requirement.artifacts).size !== requirement.artifacts.length || requirement.artifacts.some(
+        (id) => !["run", "cycle"].includes(artifacts.get(id)?.lifetime ?? "") || !decision.scope?.artifacts?.some(
+          (entry) => entry.id === id && entry.required
+        )
+      ))
+        report(
+          `approval ${requirement.decisionId} requires declared Run or Cycle artifacts in the Decision's required scope`
+        );
+    }
+  }
+  return problems;
+}
+async function workflowApprovalBlockers(runRoot, protocol, nodeToStep, nodeId, runtime, outcome) {
+  const requirements = protocol.nodes.find(
+    ({ id }) => id === nodeId
+  )?.approvalRequirements;
+  if (!requirements) return [];
+  const current = currentWorkflowArtifactVersions(runtime);
+  const versions = new Map(
+    runtime?.artifactVersions.map((version) => [version.id, version])
+  );
+  const visits = new Map(
+    runtime?.visits.map((visit) => [visit.stepId, visit.attemptId])
+  );
+  if (runtime?.currentAttempt)
+    visits.set(runtime.currentAttempt.stepId, runtime.currentAttempt.id);
+  const receipts = new Map(
+    runtime?.decisionReceipts.map((receipt) => [receipt.decisionId, receipt])
+  );
+  const blockers = [];
+  for (const { decisionId, choiceId, artifacts } of requirements) {
+    const latest = outcome?.kind === "decision" && outcome.decisionId === decisionId ? outcome : receipts.get(decisionId);
+    if (!latest || latest.choiceId !== choiceId || !latest.nodeId || latest.attemptId !== visits.get(nodeToStep[latest.nodeId])) {
+      blockers.push(
+        `Approval required for ${nodeId}: ${decisionId} must record ${choiceId} in the current Attempt`
+      );
+      continue;
+    }
+    for (const artifactId of artifacts) {
+      const version = versions.get(current[artifactId]);
+      const approved = latest.scope?.artifacts.find(
+        ({ id }) => id === artifactId
+      );
+      if (!version || !approved || approved.versionId !== version.id || approved.contentHash !== version.contentHash || version.producer.attemptId !== visits.get(nodeToStep[version.producer.nodeId])) {
+        blockers.push(
+          `Approval required for ${nodeId}: ${decisionId} must cover the current ${artifactId}`
+        );
+        continue;
+      }
+      try {
+        await validateWorkflowArtifactVersion(runRoot, protocol, version);
+      } catch (error) {
+        blockers.push(
+          `Approval required for ${nodeId}: ${artifactId} has changed (${error.message})`
+        );
+      }
+    }
+  }
+  return blockers;
+}
+
 // src/workflow/contract.ts
 function isRecord10(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -18211,6 +18392,18 @@ async function compileWorkflow(protocol) {
   } : normalizedProtocol;
   validateProtocolShape(executableProtocol);
   validateWorkflowDecisionScopeDefinition(executableProtocol);
+  const approvalProblems = approvalRequirementProblems(
+    executableProtocol.nodes,
+    executableProtocol.outputSchemas
+  );
+  if (approvalProblems.length)
+    throw new Error(approvalProblems.map(({ message }) => message).join("\n"));
+  if (executableProtocol.nodes.some(
+    (node) => !node.disabled && node.approvalRequirements
+  ) && !executableProtocol.capabilities?.features.includes("versioned-artifacts"))
+    throw new Error(
+      "Workflow approval requirements require versioned-artifacts"
+    );
   const revisioned = isRevisionedWorkflowProtocol(executableProtocol);
   if (executableProtocol.capabilities?.durability?.capabilities.includes(
     "verified-checkpoints"
@@ -23807,7 +24000,8 @@ function verificationRequirements(node) {
           required: entry.required === true
         }))
       },
-      requireContentSnapshot: requirement.requireContentSnapshot === true
+      requireContentSnapshot: requirement.requireContentSnapshot === true,
+      verifierPin: requirement.verifierPin
     });
   }
   return result;
@@ -25390,6 +25584,7 @@ async function verifyStoredVerificationReceipts(runRoot, state, identity, pkg) {
         `WorkflowRuntime verification receipt context is invalid: ${reference.receiptId}`
       );
     }
+    assertWorkflowVerifierSignature(requirement.verifierPin, receipt);
   }
 }
 async function verifyStoredPackage(runRoot, state) {
@@ -25916,7 +26111,26 @@ async function continuationFromVerifiedRun(verified, runRoot) {
         snapshotFindings.push(...workflowContentSnapshotFindings(snapshot));
     }
   }
-  return withAdditionalFindings(base, snapshotFindings);
+  const approvals = base.currentNode && !base.pendingAction?.repair && !base.pendingAction?.finalization && base.pendingAction ? await workflowApprovalBlockers(
+    runRoot,
+    verified.package.runtime.protocol,
+    verified.identity.nodeToStep,
+    base.currentNode,
+    verified.state.workflowRuntime
+  ) : [];
+  return withAdditionalFindings(
+    base,
+    [
+      ...snapshotFindings,
+      ...approvals.map(
+        (blocker) => findingFromBlocker(blocker, {
+          actionId: verified.pending?.id,
+          nodeId: base.currentNode
+        })
+      )
+    ],
+    approvals.length ? "blocked" : base.disposition
+  );
 }
 async function pendingRecoveryContinuation(location) {
   const journal = await readWorkflowTransitionJournal(location.runRoot);
@@ -26716,22 +26930,44 @@ async function validateCompletion(prepared, submission, mutation) {
     }
   );
 }
-function routeBlockers(prepared, submission, artifactMutation) {
+async function routeBlockers(prepared, submission, artifactMutation) {
   const protocol = prepared.verified.package.runtime.protocol;
   if (isWorkflowRepairAction(prepared.pending) || isWorkflowFinalizationAction(prepared.pending))
     return [];
   if (!isDecisionSubmission(submission) && submission.status !== "succeeded" || !prepared.node || !isRevisionedWorkflowProtocol(protocol)) {
     return [];
   }
+  const approvalArguments = [
+    prepared.location.runRoot,
+    protocol,
+    prepared.verified.identity.nodeToStep
+  ];
+  const state = prepared.verified.state;
+  const current = await workflowApprovalBlockers(
+    ...approvalArguments,
+    prepared.node,
+    state.workflowRuntime
+  );
+  if (current.length) return current;
   try {
-    resolveWorkflowTransition(
+    const outcome = engineOutcome(prepared, submission, artifactMutation);
+    const resolved = resolveWorkflowTransition(
       protocol,
       prepared.node,
-      engineOutcome(prepared, submission, artifactMutation),
-      prepared.verified.state.workflowRuntime,
-      prepared.verified.state.runId
+      outcome,
+      state.workflowRuntime,
+      state.runId
     );
-    return [];
+    const nextRuntime = workflowStateWithArtifactMutation(
+      state,
+      artifactMutation
+    ).workflowRuntime;
+    return workflowApprovalBlockers(
+      ...approvalArguments,
+      resolved.next,
+      nextRuntime && resolved.workflowRuntime ? { ...nextRuntime, ...resolved.workflowRuntime } : nextRuntime,
+      outcome
+    );
   } catch (error) {
     if (error instanceof WorkflowRouteResolutionError) {
       return error.blockers;
@@ -26879,6 +27115,7 @@ async function validateCurrentVerificationReceipt(prepared, requirement, receipt
   )) {
     throw new Error(verificationFailure(`is stale: ${receipt.receiptId}`));
   }
+  assertWorkflowVerifierSignature(requirement.verifierPin, receipt);
   for (const artifact of scope.artifacts) {
     const version = runtime?.artifactVersions.find(
       (candidate) => candidate.id === artifact.versionId
@@ -27103,6 +27340,7 @@ async function verificationMutationForSubmission(prepared, submission, artifactM
           },
           profile
         );
+        assertWorkflowVerifierSignature(requirement.verifierPin, receipt2);
         const reference2 = workflowVerificationReceiptReference(receipt2);
         mutation.verificationReceipts.push(reference2);
         mutation.verificationReceiptRecords.push(receipt2);
@@ -27526,7 +27764,7 @@ async function validateWorkflowSubmission(target, submission) {
     if (completion.blockers.length > 0) {
       return blockedContinuation(prepared, completion.blockers);
     }
-    const routeFindings = routeBlockers(prepared, submission, mutation);
+    const routeFindings = await routeBlockers(prepared, submission, mutation);
     if (routeFindings.length > 0) {
       return blockedContinuation(prepared, routeFindings);
     }
@@ -28547,7 +28785,11 @@ function createWorkflowRuntime() {
             if (completion.blockers.length > 0) {
               return blockedContinuation(prepared, completion.blockers);
             }
-            const routeFindings = routeBlockers(prepared, submission, mutation);
+            const routeFindings = await routeBlockers(
+              prepared,
+              submission,
+              mutation
+            );
             if (routeFindings.length > 0) {
               return blockedContinuation(prepared, routeFindings);
             }

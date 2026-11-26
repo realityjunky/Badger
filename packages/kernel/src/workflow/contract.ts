@@ -22,6 +22,8 @@ import type {
   WorkflowRoute,
   WorkflowTransition,
 } from "../types.js";
+import { validateWorkflowVerificationRequirement } from "../workflow-runtime/verification-receipts.js";
+import { approvalRequirementProblems } from "../workflow-runtime/approval-requirements.js";
 
 export interface ValidationFinding {
   code:
@@ -385,6 +387,9 @@ function cloneNode(node: NodeTemplate): NodeTemplate {
     outputSchemas: [...node.outputSchemas],
     guardrails: node.guardrails.map((item) => ({ ...item })),
     ...(node.decision ? { decision: structuredClone(node.decision) } : {}),
+    ...(node.approvalRequirements !== undefined
+      ? { approvalRequirements: structuredClone(node.approvalRequirements) }
+      : {}),
   };
 }
 
@@ -1007,6 +1012,26 @@ export function normalizeWorkflow(input: WorkflowInput): NormalizedWorkflow {
   const outputSchemas = [...(input.outputSchemas ?? [])].map((schema) =>
     structuredClone(schema),
   );
+  for (const node of nodes.filter((entry) => !entry.disabled)) {
+    for (const guardrail of node.guardrails) {
+      if (guardrail.verification?.verifierPin === undefined) continue;
+      validateWorkflowVerificationRequirement(
+        guardrail.verification,
+        `${node.id}.${guardrail.id}`,
+      );
+      if (
+        !input.capabilities?.durability?.capabilities.includes(
+          "verification-receipts",
+        )
+      )
+        throw new Error(
+          `${node.id}.${guardrail.id} requires verification-receipts durability`,
+        );
+    }
+  }
+  const approvalProblems = approvalRequirementProblems(nodes, outputSchemas);
+  if (approvalProblems.length)
+    throw new Error(approvalProblems.map(({ message }) => message).join("\n"));
   const phase3 = phase3Enabled(input);
   const edges = routingEdges(input, nodes, phase3);
   const routes = routeSummary(input, nodes);
