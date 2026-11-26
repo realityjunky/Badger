@@ -177,7 +177,7 @@ export const documentationEn = {
   "documentation.workflows.findings.revise":
     "After fixing a lane-local concern, open its accepted report and choose Request revised draft. The new job receives the current inputs and earlier findings. If a repair job is already queued, use Copy Agent prompt on that job.",
   "documentation.workflows.findings.followUp":
-    "Use Follow-up work to open a question or finding in its stage. For a Plan repair, Confirm and open plan draft attaches the finding to a draft of the approved Plan. If another repair advances the same Plan, choose Review against current plan. Compatible changes are combined automatically. Choose or edit the conflicting values and accept the combined Plan. Review and approve the revised inputs before regenerating.",
+    "Agents finish independent lane reports in parallel. Once the wave finishes, Badger queues one Plan repair for its Plan findings. Copy the Agent prompt in Package or Plans. Review the proposed changes and response to each finding, then accept or send the draft back to the Agent. For a saved lane draft from an earlier Plan, use Request agent reconciliation.",
   "documentation.workflows.findings.badger":
     "A Badger issue names the handoff, generator, WorkflowRuntime, or Agent host area that needs a fix. Package records the issue and waits for the fix. Regenerate when the fix changes the generator or generated package.",
   "documentation.workflows.evaluation":
@@ -493,7 +493,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.findings.revise":
     "处理好通道本身的问题后，打开已接受的报告，选择“请求修改稿”。新任务会收到当前输入及此前的问题。若已有修复任务在排队，请在该任务上选择“复制 Agent 提示词”。",
   "documentation.workflows.findings.followUp":
-    "在“后续工作”中前往对应阶段查看问题或发现。修订计划时，选择“确认并打开计划草稿”，系统会基于已批准的计划创建附有该发现的草稿。如果另一项修订已更新同一计划，请选择“与当前计划对照审阅”。系统会自动合并兼容的更改。请为冲突的字段选择或编辑值，审阅并接受合并后的计划。重新生成软件包前，请审阅并批准修订后的输入。",
+    "同一组的分工由 Agent 并行起草报告。所有报告完成后，Badger 会将涉及计划的发现汇总成一个计划修订任务。在软件包或计划页复制 Agent 提示词。审阅更改和对每项发现的答复，然后接受草稿或退回 Agent 修订。对于旧计划上的草稿，使用“请求 Agent 协调修订”。",
   "documentation.workflows.findings.badger":
     "Badger 问题会标明需修复的范围，包括编写任务交接、软件包生成器、WorkflowRuntime 或 Agent 宿主。问题记录在“软件包”中，等待修复。如果修复改变了生成器或生成的软件包，需重新生成。",
   "documentation.workflows.evaluation":

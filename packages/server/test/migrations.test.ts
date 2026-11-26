@@ -101,7 +101,7 @@ describe("reviewed SQL migrations", () => {
       )
     ).rows[0]!;
     const { lease_kind, lease_activity_at, deleted_at, ...original } = after;
-    expect(original).toEqual(before);
+    expect(original).toEqual({ ...before, repair_feedback: null });
     expect(deleted_at).toBeNull();
     expect(lease_kind).toBe("agent");
     expect(new Date(lease_activity_at as string).getTime()).toBe(
@@ -236,7 +236,7 @@ describe("reviewed SQL migrations", () => {
       deleted_at,
       ...original
     } = after;
-    expect(original).toEqual(before);
+    expect(original).toEqual({ ...before, repair_feedback: null });
     expect(deleted_at).toBeNull();
     expect([lease_kind, lease_activity_at]).toEqual([null, null]);
     expect([
@@ -1414,6 +1414,7 @@ describe("reviewed SQL migrations", () => {
       "0051",
       "0052",
       "0053",
+      "0054",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1474,6 +1475,7 @@ describe("reviewed SQL migrations", () => {
         "0051",
         "0052",
         "0053",
+        "0054",
       ],
       pending: [],
       drifted: [],
@@ -1517,6 +1519,7 @@ describe("reviewed SQL migrations", () => {
       "oidc_transactions",
       "package_assembly_requests",
       "package_reviews",
+      "pending_plan_repairs",
       "people",
       "person_notification_preferences",
       "person_preferences",
@@ -1644,6 +1647,7 @@ describe("reviewed SQL migrations", () => {
         "0051",
         "0052",
         "0053",
+        "0054",
       ],
       pending: [],
       drifted: [],

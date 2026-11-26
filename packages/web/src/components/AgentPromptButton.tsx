@@ -12,7 +12,7 @@ export function AgentPromptButton({
   disabled = false,
 }: {
   basePath: string;
-  path: string;
+  path: string | (() => Promise<string>);
   label?: string;
   beforeCopy?(): Promise<unknown>;
   disabled?: boolean;
@@ -30,7 +30,7 @@ export function AgentPromptButton({
       await beforeCopy?.();
       const result = await questionnaireRequest<{ prompt: string }>(
         basePath,
-        path,
+        typeof path === "string" ? path : await path(),
       );
       const base = normalizeBasePath(basePath);
       const text = `Use the connected Badger MCP for deployment ${window.location.origin}${base === "/" ? "" : base}.\n\n${result.prompt}`;

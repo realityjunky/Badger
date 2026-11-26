@@ -34,7 +34,6 @@ import { RequestError } from "./http/errors.js";
 import { createRound, saveQuestion } from "./questionnaire/store.js";
 import {
   auditJob,
-  createDraftingJob,
   publicDraftingJob,
   readDraftingJobs,
   type DraftingActor,
@@ -142,11 +141,23 @@ export async function authoringView(
      where follow_up.package_id = $1 order by follow_up.job_id`,
     [loaded.saved.id],
   );
+  const allJobs = await readDraftingJobs(tx, versionId);
   return {
+    planRepairs: allJobs
+      .filter(
+        (job) =>
+          job.context_bundle.planRepair?.packageId === loaded.saved.id &&
+          job.status !== "cancelled",
+      )
+      .map((job) => ({
+        id: job.id,
+        status: job.status,
+        wave: job.context_bundle.planRepair!.wave,
+      })),
     packageId: loaded.saved.id,
     current: loaded.saved.invalidated_at === null,
     readiness: portablePaths(loaded.root, loaded.readiness),
-    jobs: (await readDraftingJobs(tx, versionId))
+    jobs: allJobs
       .filter((j) => j.package_id === loaded.saved.id)
       .map(publicDraftingJob),
     followUps: followUps.rows.map((r) => ({
@@ -623,31 +634,17 @@ async function openStageFollowUp(
           409,
           "The plan changed; review the Authoring result again",
         );
-      const draft = await createDraftingJob(
-        tx,
-        deps,
-        actor,
-        versionId,
-        {
-          kind: "draft-plan",
-          roundId: null,
-          parentQuestionId: null,
-          skillId: null,
-          questionId: null,
-          locale: null,
-        },
-        current,
-        {
-          jobId: job.id,
-          packageId: loaded.saved.id,
-          lane: job.lane_id!,
-          resultHash: canonicalHash({ laneOutput: output }),
-          action,
-          findings: output.findings ?? [],
-          basePlan: { id: base.id, hash: base.hash, plan: base.snapshot.plan },
-        },
-      );
-      planDraftId = draft.id;
+      const repair = (await readDraftingJobs(tx, versionId))
+        .reverse()
+        .find(
+          (draft) =>
+            draft.context_bundle.planRepair?.reports.some(
+              (report) =>
+                report.jobId === job.id &&
+                report.resultHash === canonicalHash({ laneOutput: output }),
+            ) && !["rejected", "cancelled"].includes(draft.status),
+        );
+      planDraftId = repair?.id ?? null;
       targetId = base.id;
       targetHash = base.hash;
       break;

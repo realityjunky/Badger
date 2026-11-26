@@ -16,8 +16,6 @@ import type { FactoryPlan, PlanView } from "../../api/plans.js";
 import type {
   AnyDraftingJob,
   PlanDraftingJob,
-  PlanReconciliation,
-  PlanReconciliationPreview,
 } from "../../api/drafting-jobs.js";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import type {
@@ -31,7 +29,6 @@ import { useLiveUpdates } from "../../live/LiveUpdatesContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { PlanContent, PlanTabs } from "./PlanContent.js";
 import { PlanEditor } from "./PlanEditor.js";
-import { PlanConflicts } from "./PlanConflicts.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 import { WorkflowProposal } from "./WorkflowProposal.js";
 import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
@@ -64,12 +61,6 @@ export function WorkflowPlan({
   const [editing, setEditing] = useState<{
     plan: FactoryPlan;
     job?: PlanDraftingJob;
-    reconciliation?: PlanReconciliation;
-    combinedPlanHash?: string;
-  } | null>(null);
-  const [conflicting, setConflicting] = useState<{
-    job: PlanDraftingJob;
-    review: PlanReconciliationPreview;
   } | null>(null);
   const [approval, setApproval] = useState<{
     preview: GatePreview;
@@ -197,31 +188,17 @@ export function WorkflowPlan({
     if (tab && tab !== "jobs") selectTab("jobs");
     await changed();
   }
-  async function reviewLaneDraft(
-    job: PlanDraftingJob,
-    choices: PlanReconciliation["choices"] = {},
-  ) {
-    const review = await questionnaireRequest<PlanReconciliationPreview>(
+  async function requestRepair(job: PlanDraftingJob) {
+    const { job: repair } = await questionnaireRequest<{
+      job: PlanDraftingJob;
+    }>(
       basePath,
-      path + "/drafting-jobs/" + job.id + "/reconcile-plan",
+      path + "/drafting-jobs/" + job.id + "/request-plan-repair",
       "POST",
-      {
-        revision: job.revision,
-        headVersionId: job.reconciliationHeadId,
-        choices,
-      },
+      { revision: job.revision, confirmed: true },
     );
-    if (review.conflicts.some(({ path }) => !Object.hasOwn(choices, path))) {
-      setConflicting({ job, review });
-    } else {
-      setConflicting(null);
-      setEditing({
-        job,
-        plan: review.plan,
-        reconciliation: review.reconciliation,
-        combinedPlanHash: review.combinedPlanHash,
-      });
-    }
+    await changed();
+    return path + "/drafting-jobs/" + repair.id + "/prompt";
   }
   async function deleteDraft() {
     if (!deleting) return;
@@ -270,6 +247,21 @@ export function WorkflowPlan({
   async function discardSuggestion() {
     if (!discard) return;
     const body = { revision: discard.job.revision, reason: discard.reason };
+    if (discard.job.planRepair) {
+      await questionnaireRequest(
+        basePath,
+        path + "/drafting-jobs/" + discard.job.id + "/return-plan",
+        "POST",
+        { ...body, confirmed: true },
+      );
+      setDiscard(null);
+      navigate({
+        search: new URLSearchParams({ planDraft: discard.job.id }).toString(),
+        hash: "plan",
+      });
+      await changed();
+      return;
+    }
     if (!discard.hash) {
       const { preview } = await questionnaireRequest<{
         preview: { confirmationHash: string };
@@ -455,112 +447,159 @@ export function WorkflowPlan({
               <PlanTabs version={selected} tab={tab} onTab={selectTab}>
                 {detail.capabilities.editPlan && jobs.length > 0 ? (
                   <ul className="questionnaire-concerns">
-                    {visibleJobs.map((job) => (
-                      <li
-                        key={job.id}
-                        ref={job.id === draftId ? selectedDraftRow : undefined}
-                      >
-                        {job.id === draftId && findingId ? (
-                          <AuthoringStageFinding
-                            basePath={basePath}
-                            path={path}
-                            stage="plan"
-                          />
-                        ) : (
-                          job.authoringFollowUp && (
-                            <Alert
-                              type="info"
-                              title={format("authoring.findingOrigin", {
-                                lane: job.authoringFollowUp.lane,
-                              })}
-                              description={
-                                job.authoringFollowUp.action.requirement
-                              }
+                    {visibleJobs.map((job) => {
+                      const successor = [...jobs]
+                        .reverse()
+                        .find(
+                          (other) =>
+                            other.planRepair?.sourceDraftIds.includes(job.id) &&
+                            other.status !== "cancelled",
+                        );
+                      return (
+                        <li
+                          key={job.id}
+                          ref={
+                            job.id === draftId ? selectedDraftRow : undefined
+                          }
+                        >
+                          {job.id === draftId && findingId ? (
+                            <AuthoringStageFinding
+                              basePath={basePath}
+                              path={path}
+                              stage="plan"
                             />
-                          )
-                        )}
-                        <Space wrap>
-                          <span className="plan-draft-id">
-                            {t("plan.draft")} <code>{job.id}</code>
-                          </span>
-                          <Tag>
-                            {t(
-                              job.reconciliationHeadId &&
-                                ["submitted", "cancelled"].includes(job.status)
-                                ? "plan.newerVersion"
-                                : `drafting.state.${job.status}`,
-                            )}
-                          </Tag>
-                          {["queued", "submitted"].includes(job.status) &&
-                            detail.capabilities.editPlan && (
-                              <AgentPromptButton
-                                basePath={basePath}
-                                path={`${path}/drafting-jobs/${job.id}/prompt`}
-                              />
-                            )}
-                          {job.reconciliationHeadId &&
-                          ["submitted", "cancelled"].includes(job.status) ? (
-                            <Button
-                              disabled={busy || !view.skeleton}
-                              onClick={() =>
-                                void run(() => reviewLaneDraft(job))
-                              }
-                            >
-                              {t("plan.reconcile")}
-                            </Button>
                           ) : (
-                            job.status === "submitted" && (
-                              <Button
-                                disabled={busy || !view.skeleton}
-                                onClick={() =>
-                                  setEditing({
-                                    plan: structuredClone(
-                                      (job.review?.result ?? job.result!).plan,
-                                    ),
-                                    job,
-                                  })
+                            job.authoringFollowUp && (
+                              <Alert
+                                type="info"
+                                title={format("authoring.findingOrigin", {
+                                  lane: job.authoringFollowUp.lane,
+                                })}
+                                description={
+                                  job.authoringFollowUp.action.requirement
                                 }
-                              >
-                                {t("plan.reviewSuggestion")}
-                              </Button>
+                              />
                             )
                           )}
-                          {job.status === "submitted" && (
+                          {successor && (
                             <Button
-                              disabled={busy}
+                              type="link"
                               onClick={() =>
-                                setDiscard({
-                                  job,
-                                  reason: "",
-                                  requestId: crypto.randomUUID(),
+                                navigate({
+                                  search: new URLSearchParams({
+                                    planDraft: successor.id,
+                                  }).toString(),
+                                  hash: "plan",
                                 })
                               }
                             >
-                              {t("drafting.discard")}
+                              {t("plan.openRepair")}
                             </Button>
                           )}
-                          {job.status !== "claimed" &&
-                            job.status !== "accepted" && (
+                          <Space wrap>
+                            {job.planRepair && (
+                              <strong>
+                                {format("plan.waveRepair", {
+                                  wave: job.planRepair.wave,
+                                })}
+                              </strong>
+                            )}
+                            <span className="plan-draft-id">
+                              {t("plan.draft")} <code>{job.id}</code>
+                            </span>
+                            <Tag>
+                              {t(
+                                job.reconciliationHeadId &&
+                                  ["submitted", "cancelled"].includes(
+                                    job.status,
+                                  )
+                                  ? "plan.newerVersion"
+                                  : `drafting.state.${job.status}`,
+                              )}
+                            </Tag>
+                            {!job.reconciliationHeadId &&
+                              ["queued", "submitted"].includes(job.status) &&
+                              detail.capabilities.editPlan && (
+                                <AgentPromptButton
+                                  basePath={basePath}
+                                  path={`${path}/drafting-jobs/${job.id}/prompt`}
+                                />
+                              )}
+                            {job.reconciliationHeadId &&
+                            ["submitted", "cancelled"].includes(job.status) ? (
+                              <AgentPromptButton
+                                basePath={basePath}
+                                path={() => requestRepair(job)}
+                                label={t("plan.requestAgentRepair")}
+                                disabled={
+                                  busy ||
+                                  !view.skeleton ||
+                                  (!!successor &&
+                                    !["queued", "submitted"].includes(
+                                      successor.status,
+                                    ))
+                                }
+                              />
+                            ) : (
+                              job.status === "submitted" && (
+                                <Button
+                                  disabled={busy || !view.skeleton}
+                                  onClick={() =>
+                                    setEditing({
+                                      plan: structuredClone(
+                                        (job.review?.result ?? job.result!)
+                                          .plan,
+                                      ),
+                                      job,
+                                    })
+                                  }
+                                >
+                                  {t("plan.reviewSuggestion")}
+                                </Button>
+                              )
+                            )}
+                            {job.status === "submitted" && (
                               <Button
-                                danger
                                 disabled={busy}
-                                onClick={() => {
-                                  setFailure(null);
-                                  setDeleting(job);
-                                }}
+                                onClick={() =>
+                                  setDiscard({
+                                    job,
+                                    reason: "",
+                                    requestId: crypto.randomUUID(),
+                                  })
+                                }
                               >
-                                {t("plan.deleteDraft")}
+                                {t(
+                                  job.planRepair
+                                    ? "plan.sendBack"
+                                    : "drafting.discard",
+                                )}
                               </Button>
                             )}
-                        </Space>
-                        {job.status === "claimed" &&
-                          (job.review?.result ?? job.result) && (
-                            <p className="muted" role="status">
-                              {t("plan.draftSaved")}
-                            </p>
-                          )}
-                      </li>
-                    ))}
+                            {job.status !== "claimed" &&
+                              job.status !== "accepted" && (
+                                <Button
+                                  danger
+                                  disabled={busy}
+                                  onClick={() => {
+                                    setFailure(null);
+                                    setDeleting(job);
+                                  }}
+                                >
+                                  {t("plan.deleteDraft")}
+                                </Button>
+                              )}
+                          </Space>
+                          {job.feedback && <p>{job.feedback.reason}</p>}
+                          {job.status === "claimed" &&
+                            (job.review?.result ?? job.result) && (
+                              <p className="muted" role="status">
+                                {t("plan.draftSaved")}
+                              </p>
+                            )}
+                        </li>
+                      );
+                    })}
                   </ul>
                 ) : (
                   <p className="empty-state">
@@ -572,18 +611,6 @@ export function WorkflowPlan({
                   </p>
                 )}
               </PlanTabs>
-              {conflicting && (
-                <PlanConflicts
-                  key={conflicting.job.id}
-                  review={conflicting.review}
-                  busy={busy}
-                  failure={failure}
-                  onClose={() => setConflicting(null)}
-                  onReview={(choices) =>
-                    void run(() => reviewLaneDraft(conflicting.job, choices))
-                  }
-                />
-              )}
               {editing && (
                 <PlanEditor
                   key={editing.job?.id ?? "plan-editor"}
@@ -591,8 +618,6 @@ export function WorkflowPlan({
                   path={path}
                   view={view}
                   initialPlan={editing.plan}
-                  reconciliation={editing.reconciliation}
-                  combinedPlanHash={editing.combinedPlanHash}
                   job={editing.job}
                   onClose={() => setEditing(null)}
                   onSaved={() => {
@@ -636,8 +661,20 @@ export function WorkflowPlan({
       </Modal>
       <Modal
         open={discard !== null}
-        title={t(discard?.hash ? "drafting.preview" : "drafting.discard")}
-        okText={t(discard?.hash ? "drafting.discard" : "drafting.preview")}
+        title={t(
+          discard?.job.planRepair
+            ? "plan.sendBack"
+            : discard?.hash
+              ? "drafting.preview"
+              : "drafting.discard",
+        )}
+        okText={t(
+          discard?.job.planRepair
+            ? "plan.sendBack"
+            : discard?.hash
+              ? "drafting.discard"
+              : "drafting.preview",
+        )}
         cancelText={t("common.cancel")}
         confirmLoading={busy}
         okButtonProps={{ disabled: !discard?.reason.trim() }}
@@ -647,7 +684,7 @@ export function WorkflowPlan({
         onOk={() => void run(discardSuggestion)}
       >
         <label className="field-label" htmlFor="plan-discard-reason">
-          {t("drafting.reason")}
+          {t(discard?.job.planRepair ? "plan.feedback" : "drafting.reason")}
         </label>
         <Input.TextArea
           id="plan-discard-reason"

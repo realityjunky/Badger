@@ -58,6 +58,7 @@ type View = {
   current: boolean;
   readiness: AuthoringReadiness;
   jobs: LaneJob[];
+  planRepairs?: { id: string; status: string; wave: string }[];
   followUps: (StageFollowUp & {
     jobId: string;
     laneId: string;
@@ -496,6 +497,31 @@ export function WorkflowAuthoring({
               },
             ]}
           />
+          {view.planRepairs?.map((repair) => (
+            <Space key={repair.id} wrap>
+              <Link
+                to={{
+                  search: new URLSearchParams({
+                    planDraft: repair.id,
+                  }).toString(),
+                  hash: "plan",
+                }}
+              >
+                {format("plan.waveRepair", { wave: repair.wave })}
+              </Link>
+              <Tag>
+                {t(
+                  `drafting.state.${repair.status}` as "drafting.state.queued",
+                )}
+              </Tag>
+              {canManage && ["queued", "submitted"].includes(repair.status) && (
+                <AgentPromptButton
+                  basePath={basePath}
+                  path={path + "/drafting-jobs/" + repair.id + "/prompt"}
+                />
+              )}
+            </Space>
+          ))}
           {view.followUps.length > 0 && (
             <>
               <h4>{t("authoring.followUps")}</h4>
@@ -503,7 +529,11 @@ export function WorkflowAuthoring({
                 {view.followUps.map((item) => (
                   <li key={item.jobId}>
                     {item.laneId}:{" "}
-                    {item.questionId ? (
+                    {item.stage === "plan" &&
+                    !item.planDraftId &&
+                    view.current ? (
+                      t("plan.waitingReports")
+                    ) : item.questionId ? (
                       <Link
                         to={`/questionnaire/questions/${encodeURIComponent(item.questionId)}`}
                       >

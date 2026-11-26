@@ -41,7 +41,13 @@ export interface ImportedQuestion {
 }
 export type DraftResult =
   | { laneOutput: AuthoringLaneOutput }
-  | { plan: FactoryPlan }
+  | {
+      plan: FactoryPlan;
+      resolutions?: Record<
+        string,
+        import("@realityjunky/badger").PlanRepairResolution
+      >;
+    }
   | { questions: QuestionContent[] }
   | { questions: ImportedQuestion[] }
   | {
@@ -229,8 +235,8 @@ export const DRAFT_SCHEMAS = {
     },
   }),
 };
-export function draftResultFields(kind: DraftingKind) {
-  if (kind === "draft-plan") return ["plan"];
+export function draftResultFields(kind: DraftingKind, repair = false) {
+  if (kind === "draft-plan") return repair ? ["plan", "resolutions"] : ["plan"];
   return Object.keys(DRAFT_SCHEMAS[kind].properties);
 }
 
@@ -252,7 +258,16 @@ export function validateDraftResult(
   const input = objectInput(result);
   if (kind === "authoring-lane" || kind === "review-vote")
     return { laneOutput: input.laneOutput as AuthoringLaneOutput };
-  if (kind === "draft-plan") return { plan: input.plan as FactoryPlan };
+  if (kind === "draft-plan")
+    return {
+      plan: input.plan as FactoryPlan,
+      ...(input.resolutions !== undefined && {
+        resolutions: input.resolutions as Record<
+          string,
+          import("@realityjunky/badger").PlanRepairResolution
+        >,
+      }),
+    };
   if (kind === "import-open-questions") {
     const questions = (input.questions as unknown[]).map(
       (raw): ImportedQuestion => {

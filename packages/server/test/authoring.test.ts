@@ -247,147 +247,11 @@ it("retains concern details and requests a revision with the fixed handoff", asy
   expect(duplicate.jobs).toEqual([]);
 });
 
-it("opens one plan draft from a confirmed lane blocker without changing the current plan", async () => {
+it("groups the finished wave into one claimable Plan repair, validates every finding and returns feedback to the agent", async () => {
   const fixture = await generated();
   const { call, base } = fixture;
-  const planBefore = await call(`${base}/plan`);
-  const { jobs } = await call(
-    `${base}/package/authoring-jobs`,
-    "POST",
-    { confirmed: true },
-    engineer,
-    201,
-  );
-  const script = jobs.find((job: any) => job.laneId === "script");
-  const { secret } = await call(
-    "/me/tokens",
-    "POST",
-    { name: "plan follow-up", scopes: ["engineer"] },
-    engineer,
-    201,
-  );
-  const { job } = await acceptLane(fixture, secret, script, (context) => ({
-    lane: "script",
-    status: "BLOCKED",
-    semanticDossierHash: context.authoring.plan.semanticDossierHash,
-    summary: "The workflow does not bind the report to the reviewer decision.",
-    action: {
-      kind: "repair",
-      target: { stage: "plan" },
-      requirement: "Bind the review to the exact report artifact.",
-      prompt: "Require the report digest when approving the report Node.",
-    },
-  }));
-  const draftId = job.decision?.followUp?.planDraftId;
-  expect(draftId).toBeTypeOf("string");
-  const repeated = await call(
-    `${base}/drafting-jobs/${script.id}/accept`,
-    "POST",
-    {
-      revision: job.decision.revision,
-      laneOutput: job.decision.decision.laneOutput,
-      confirmed: true,
-      confirmationHash: job.decision.confirmationHash,
-      requestId: `accept-${script.id}`,
-    },
-  );
-  expect(repeated.job.decision.followUp.planDraftId).toBe(draftId);
-  const reference = jobs.find((entry: any) => entry.laneId === "reference");
-  await acceptLane(fixture, secret, reference, (context) => ({
-    lane: "reference",
-    status: "BLOCKED",
-    semanticDossierHash: context.authoring.plan.semanticDossierHash,
-    summary: "The generated hook used the stale compatibility projection.",
-    action: {
-      kind: "bug",
-      area: "generator",
-      requirement: "Read the current WorkflowRuntime action.",
-      prompt:
-        "Compare hook output while the compatibility projection is stale.",
-    },
-  }));
-  const view = await call(`${base}/package/authoring`);
-  expect(view.followUps).toContainEqual(
-    expect.objectContaining({
-      laneId: "script",
-      stage: "plan",
-      jobId: script.id,
-      planDraftId: draftId,
-    }),
-  );
-  await call(
-    `${base}/package/authoring-jobs`,
-    "POST",
-    { confirmed: true },
-    engineer,
-    201,
-  );
-  const { jobs: all } = await call(`${base}/drafting-jobs`);
-  expect(all.filter((entry: any) => entry.laneId === "script")).toHaveLength(1);
-  expect(all.filter((entry: any) => entry.laneId === "reference")).toHaveLength(
-    1,
-  );
-  expect(
-    all.filter(
-      (entry: any) => entry.kind === "draft-plan" && entry.status === "queued",
-    ),
-  ).toHaveLength(1);
-  const draft = all.find((entry: any) => entry.id === draftId);
-  const route = `${base}/drafting-jobs/${draft.id}`;
-  const claim = await call(
-    route + "/claim",
-    "POST",
-    { revision: draft.revision },
-    engineer,
-    200,
-    secret,
-  );
-  expect(claim.contextBundle.authoringFollowUp).toMatchObject({
-    jobId: script.id,
-    resultHash: job.currentResultHash,
-    action: {
-      target: { stage: "plan" },
-      prompt: "Require the report digest when approving the report Node.",
-    },
-  });
-  expect(claim.contextBundle.authoringFollowUp.basePlan.id).toBe(
-    claim.contextBundle.planning.basePlanVersionId,
-  );
-  expect(claim.instructions).toContain(
-    "Require the report digest when approving the report Node.",
-  );
-  const { job: released } = await call(
-    route + "/release",
-    "POST",
-    { leaseId: claim.job.lease.id, contextHash: claim.job.contextHash },
-    engineer,
-    200,
-    secret,
-  );
-  await call(route, "DELETE", { revision: released.revision, confirmed: true });
-  expect((await call(`${base}/package/authoring`)).followUps).toContainEqual(
-    expect.objectContaining({
-      jobId: script.id,
-      stage: "plan",
-      planDraftId: null,
-    }),
-  );
-  expect(
-    await call(`${base}/package/authoring?finding=${script.id}`),
-  ).toMatchObject({
-    finding: { jobId: script.id, action: { target: { stage: "plan" } } },
-  });
-  expect(await call(`${base}/plan`)).toMatchObject({
-    versions: planBefore.versions,
-    headVersionId: planBefore.headVersionId,
-    confirmation: planBefore.confirmation,
-  });
-});
-
-it("reviews concurrent lane plan repairs against the current plan and replays the exact decision", async () => {
-  const fixture = await generated();
-  const { call, base } = fixture;
-  const { jobs } = await call(
+  const planBefore = await call(base + "/plan");
+  const { jobs: lanes } = await call(
     base + "/package/authoring-jobs",
     "POST",
     { confirmed: true },
@@ -397,223 +261,233 @@ it("reviews concurrent lane plan repairs against the current plan and replays th
   const { secret } = await call(
     "/me/tokens",
     "POST",
-    { name: "plan repairs", scopes: ["engineer"] },
+    { name: "Wave agents", scopes: ["engineer"] },
     engineer,
     201,
   );
-  const drafts = [];
-  let inFlight:
-    | { route: string; leaseId: string; contextHash: string; plan: unknown }
-    | undefined;
-  for (const lane of ["script", "reference", "pause-points"]) {
-    const { job: report } = await acceptLane(
-      fixture,
-      secret,
-      jobs.find((job: any) => job.laneId === lane),
-      (context) => ({
-        lane,
-        status: "BLOCKED",
-        semanticDossierHash: context.authoring.plan.semanticDossierHash,
-        summary: "The review contract needs a change.",
-        action: {
-          kind: "repair",
-          target: { stage: "plan" },
-          requirement: "Revise the report contract.",
-          prompt: "Revise the report node.",
-        },
-      }),
-    );
-    const route =
-      base + "/drafting-jobs/" + report.decision.followUp.planDraftId;
-    const { job } = await call(route);
+  const all = async () => (await call(base + "/drafting-jobs")).jobs;
+  const repairs = async () =>
+    (await all()).filter((job: any) => job.planRepair);
+  const handoffs = [];
+  for (const lane of lanes) {
+    const route = base + "/drafting-jobs/" + lane.id;
     const claim = await call(
       route + "/claim",
       "POST",
-      { revision: job.revision },
+      { revision: lane.revision },
       engineer,
       200,
       secret,
     );
-    const plan = claim.contextBundle.authoringFollowUp.basePlan.plan;
-    const node = plan.workflow.customNodes[0];
-    node.label = lane === "reference" ? "reference label" : "script label";
-    if (lane === "reference")
-      node.guardrails.push({
-        id: "reference-check",
-        label: "Reference evidence for the report.",
-        validation: "evidence-only",
-      });
-    else node.responsibility = "Keep the reviewed report.";
-    const { job: submitted } = await call(
+    const result = {
+      laneOutput:
+        lane.laneId === "pause-points"
+          ? reportLaneOutput(claim.contextBundle)
+          : {
+              lane: lane.laneId,
+              status: "BLOCKED",
+              semanticDossierHash:
+                claim.contextBundle.authoring.plan.semanticDossierHash,
+              summary: "Repair the reviewed report.",
+              findings: [
+                {
+                  severity: "important",
+                  problem: lane.laneId + " evidence is missing.",
+                },
+              ],
+              action: {
+                kind: "repair",
+                target: { stage: "plan" },
+                requirement: "Update the report contract.",
+                prompt: "Bind " + lane.laneId + " evidence.",
+              },
+            },
+    };
+    const lease = {
+      leaseId: claim.job.lease.id,
+      contextHash: claim.job.contextHash,
+    };
+    await call(
       route + "/submit",
       "POST",
-      {
-        leaseId: claim.job.lease.id,
-        contextHash: claim.job.contextHash,
-        result: { plan },
-        keepClaim: lane === "pause-points",
-      },
+      { ...lease, result, keepClaim: true },
       engineer,
       200,
       secret,
     );
-    if (lane === "pause-points") {
-      inFlight = {
-        route,
-        leaseId: claim.job.lease.id,
-        contextHash: claim.job.contextHash,
-        plan,
-      };
-      continue;
-    }
-    const decision = { revision: submitted.revision, plan };
-    const { preview } = await call(route + "/accept-preview", "POST", decision);
-    drafts.push({
-      route,
-      decision,
-      confirmation: {
-        ...decision,
-        confirmed: true,
-        confirmationHash: preview.confirmationHash,
-        requestId: "accept-" + lane,
-      },
-    });
+    handoffs.push({ route, lease, result, lane });
   }
-  const [script, reference] = drafts;
-  const first = await call(
-    script!.route + "/accept",
+  await call(
+    handoffs[0]!.route + "/finish",
     "POST",
-    script!.confirmation,
-  );
-  const headVersionId = first.job.decision.planVersionId;
-  const { job: pending } = await call(reference!.route);
-  expect(pending.status).toBe("submitted");
-  expect(pending.reconciliationHeadId).toBe(headVersionId);
-  await fixture.approve("plan", owner);
-  const approved = await call(base + "/plan");
-  const identical = { headVersionId, choices: {} };
-  const duplicate = inFlight!;
-  expect((await call(duplicate.route)).job.status).toBe("claimed");
-  const { job: finished } = await call(
-    duplicate.route + "/finish",
-    "POST",
-    { leaseId: duplicate.leaseId, contextHash: duplicate.contextHash },
+    handoffs[0]!.lease,
     engineer,
     200,
     secret,
   );
-  const sameDecision = {
-    revision: finished.revision,
-    plan: duplicate.plan,
-    reconciliation: identical,
-  };
-  const { preview: samePreview } = await call(
-    duplicate.route + "/accept-preview",
-    "POST",
-    sameDecision,
+  expect(await repairs()).toHaveLength(0);
+  await Promise.all(
+    handoffs
+      .slice(1)
+      .map(({ route, lease }) =>
+        call(route + "/finish", "POST", lease, engineer, 200, secret),
+      ),
   );
-  const same = await call(duplicate.route + "/accept", "POST", {
-    ...sameDecision,
-    confirmed: true,
-    confirmationHash: samePreview.confirmationHash,
-    requestId: "same-plan",
-  });
-  expect(same.job.decision.planVersionId).toBe(headVersionId);
-  expect(await call(base + "/plan")).toEqual(approved);
-  await call(
-    reference!.route + "/accept",
+  const [repair] = await repairs();
+  expect(await repairs()).toHaveLength(1);
+  expect(repair.planRepair.items.map((item: any) => item.source)).toEqual([
+    "script",
+    "reference",
+  ]);
+  expect(
+    (await all())
+      .filter((job: any) => job.laneId)
+      .every((job: any) => job.status === "submitted"),
+  ).toBe(true);
+  expect((await call(base + "/package/authoring")).planRepairs).toEqual([
+    { id: repair.id, wave: "wave1", status: "queued" },
+  ]);
+  const script = handoffs.find((item) => item.lane.laneId === "script")!;
+  const sourceDecision = {
+    revision: (await call(script.route)).job.revision,
+    ...script.result,
+  };
+  const lanePreview = await call(
+    script.route + "/accept-preview",
     "POST",
-    reference!.confirmation,
+    sourceDecision,
+  );
+  const laneConfirm = {
+    ...sourceDecision,
+    confirmed: true,
+    confirmationHash: lanePreview.preview.confirmationHash,
+    requestId: "accept-script-report",
+  };
+  const laneAccepted = await call(
+    script.route + "/accept",
+    "POST",
+    laneConfirm,
+  );
+  expect(laneAccepted.job.decision.followUp.planDraftId).toBe(repair.id);
+  expect(await call(script.route + "/accept", "POST", laneConfirm)).toEqual(
+    laneAccepted,
+  );
+  const route = base + "/drafting-jobs/" + repair.id;
+  expect((await call(route + "/prompt")).prompt).toContain("script, reference");
+  const claim = await call(
+    route + "/claim",
+    "POST",
+    { revision: repair.revision },
+    engineer,
+    200,
+    secret,
+  );
+  expect(claim.contextBundle.planRepair.basePlan.id).toBe(
+    planBefore.currentVersionId,
+  );
+  expect(claim.instructions).toContain("already-covered");
+  const plan = structuredClone(claim.contextBundle.planRepair.basePlan.plan);
+  plan.workflow.customNodes[0].label = "Review both sources";
+  const resolutions = Object.fromEntries(
+    repair.planRepair.items.map((item: any) => [
+      item.id,
+      { status: "addressed", explanation: "See the report Node label." },
+    ]),
+  );
+  const lease = {
+    leaseId: claim.job.lease.id,
+    contextHash: claim.job.contextHash,
+  };
+  await call(
+    route + "/submit",
+    "POST",
+    { ...lease, result: { plan, resolutions: {} } },
+    engineer,
+    400,
+    secret,
+  );
+  const invalid = structuredClone(plan);
+  invalid.workflow.customNodes[0].id = "different-node";
+  await call(
+    route + "/submit",
+    "POST",
+    { ...lease, result: { plan: invalid, resolutions } },
     engineer,
     409,
+    secret,
   );
-  const review = await call(reference!.route + "/reconcile-plan", "POST", {
-    revision: pending.revision,
-    headVersionId,
-    choices: {},
-  });
-  expect(review.conflicts).toHaveLength(1);
-  expect(review.conflicts[0]).toMatchObject({
-    current: "script label",
-    draft: "reference label",
-  });
+  const { job: submitted } = await call(
+    route + "/submit",
+    "POST",
+    { ...lease, result: { plan, resolutions } },
+    engineer,
+    200,
+    secret,
+  );
+  const feedback = {
+    revision: submitted.revision,
+    reason: "Clarify the reviewer evidence.",
+    confirmed: true,
+  };
+  const returned = await call(route + "/return-plan", "POST", feedback);
+  expect(
+    (await call(route + "/return-plan", "POST", feedback)).job.revision,
+  ).toBe(returned.job.revision);
+  expect(await repairs()).toHaveLength(1);
+  const next = await call(
+    route + "/claim",
+    "POST",
+    { revision: returned.job.revision },
+    engineer,
+    200,
+    secret,
+  );
+  expect(next.job.result.plan).toEqual(plan);
+  expect(next.instructions).toContain(feedback.reason);
   await call(
-    reference!.route + "/accept-preview",
+    route + "/finish",
+    "POST",
+    { leaseId: next.job.lease.id, contextHash: next.job.contextHash },
+    engineer,
+    409,
+    secret,
+  );
+  plan.workflow.customNodes[0].label = "Review both sources and their evidence";
+  const revised = await call(
+    route + "/submit",
     "POST",
     {
-      revision: pending.revision,
-      plan: review.plan,
-      reconciliation: identical,
+      leaseId: next.job.lease.id,
+      contextHash: next.job.contextHash,
+      result: { plan, resolutions },
     },
     engineer,
-    409,
+    200,
+    secret,
   );
-  const reconciliation = {
-    headVersionId,
-    choices: { [review.conflicts[0].path]: "draft" },
-  };
-  const resolved = await call(reference!.route + "/reconcile-plan", "POST", {
-    revision: pending.revision,
-    ...reconciliation,
-  });
-  expect(resolved.plan.workflow.customNodes[0]).toMatchObject({
-    label: "reference label",
-    responsibility: "Keep the reviewed report.",
-    guardrails: [{ id: "reference-check" }],
-  });
+  const decision = { revision: revised.job.revision, plan, resolutions };
   await call(
-    reference!.route + "/accept-preview",
+    route + "/accept-preview",
     "POST",
-    { ...reference!.decision, reconciliation },
+    { ...decision, plan: claim.contextBundle.planRepair.basePlan.plan },
     engineer,
     409,
   );
-  const decision = {
-    revision: pending.revision,
-    plan: resolved.plan,
-    reconciliation,
-  };
-  const editedPlan = structuredClone(resolved.plan);
-  editedPlan.workflow.customNodes[0].label = "A reviewed combination";
-  for (const [editedFromHash, status] of [
-    ["obsolete", 409],
-    [resolved.combinedPlanHash, 200],
-  ] as const) {
-    await call(
-      reference!.route + "/accept-preview",
-      "POST",
-      {
-        ...decision,
-        plan: editedPlan,
-        reconciliation: { ...reconciliation, editedFromHash },
-      },
-      engineer,
-      status,
-    );
-  }
-  const { preview } = await call(
-    reference!.route + "/accept-preview",
-    "POST",
-    decision,
-  );
+  const { preview } = await call(route + "/accept-preview", "POST", decision);
   const confirmation = {
     ...decision,
     confirmed: true,
     confirmationHash: preview.confirmationHash,
-    requestId: "reconciled-reference",
+    requestId: "accept-wave-plan",
   };
-  const accepted = await call(
-    reference!.route + "/accept",
-    "POST",
-    confirmation,
+  await call(route + "/accept", "POST", confirmation, engineer, 403, secret);
+  expect((await call(base + "/plan")).headVersionId).toBe(
+    planBefore.headVersionId,
   );
-  expect(
-    await call(reference!.route + "/accept", "POST", confirmation),
-  ).toEqual(accepted);
-  const current = await call(base + "/plan");
-  expect(current.versions).toHaveLength(3);
-  expect(current.versions[0].snapshot.plan).toEqual(resolved.plan);
-  expect(accepted.job.result.plan).toEqual(reference!.decision.plan);
+  const accepted = await call(route + "/accept", "POST", confirmation);
+  expect(await call(route + "/accept", "POST", confirmation)).toEqual(accepted);
+  expect((await call(base + "/plan")).versions[0].snapshot.plan).toEqual(plan);
+  expect(await repairs()).toHaveLength(1);
 });
 
 it("links accepted Sources, Dossier, and Proposal findings to their exact inputs", async () => {

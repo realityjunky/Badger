@@ -14,6 +14,7 @@ import {
   deletePlanDraft,
   draftingTarget,
   finishDraftingJob,
+  finishInbox,
   isQuestionnaireDraftingJob,
   jobDecisionPreview,
   publicDraftingJob,
@@ -26,6 +27,10 @@ import {
 } from "../drafting/jobs.js";
 import { saveDraftingReview } from "../drafting/reviews.js";
 import { reviewPlanReconciliation } from "../drafting/plan-reconciliation.js";
+import {
+  requestHistoricalPlanRepair,
+  syncWavePlanRepairs,
+} from "../drafting/wave-plan-repairs.js";
 import { draftingSkills } from "../drafting/context.js";
 import { draftingJobPrompt } from "../drafting/prompts.js";
 import { readVersion } from "../skills/library.js";
@@ -43,7 +48,7 @@ import {
 } from "../drafting/schema.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|finish|renew|release|review|review-claim|reconcile-plan|accept-preview|accept|reject-preview|reject))?)?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|finish|renew|release|review|review-claim|reconcile-plan|request-plan-repair|return-plan|accept-preview|accept|reject-preview|reject))?)?$/u;
 const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
   "draft-questions": ["roundId"],
   "draft-follow-ups": ["roundId", "parentQuestionId"],
@@ -176,6 +181,9 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         versionId,
         jobs,
       );
+    const syncRepairs = () =>
+      syncWavePlanRepairs(tx, deps, actor, versionId, current, jobs);
+    if (capabilities.compose) await syncRepairs();
     if (!id) {
       if (method !== "POST") {
         const visible = capabilities.compose
@@ -320,6 +328,81 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       await auditJob(tx, deps, actor, job, "viewed", null);
       return { status: 200, value: { job: publicDraftingJob(job) } };
     }
+    if (action === "request-plan-repair" || action === "return-plan") {
+      if (actor.credential.kind === "token" || !workflowAccess.editPlan)
+        throw new RequestError(
+          403,
+          "Only a signed-in Engineer requests Plan repairs.",
+        );
+      fields(body, [
+        "revision",
+        "confirmed",
+        ...(action === "return-plan" ? ["reason"] : []),
+      ]);
+      if (body.confirmed !== true)
+        throw new RequestError(400, "Confirm the Plan repair request.");
+      const revision = revisionInput(body.revision);
+      if (action === "request-plan-repair") {
+        if (revision !== job.revision)
+          return conflict(
+            "The source draft changed. Reopen it before requesting a repair.",
+          );
+        const repair = await requestHistoricalPlanRepair(
+          tx,
+          deps,
+          actor,
+          current,
+          jobs,
+          job,
+        );
+        return { status: 200, value: { job: publicDraftingJob(repair) } };
+      }
+      const reason = textInput(body.reason, "reason", 4000);
+      if (
+        job.repair_feedback?.revision === revision &&
+        job.repair_feedback.reason === reason
+      )
+        return { status: 200, value: { job: publicDraftingJob(job) } };
+      if (
+        !job.context_bundle.planRepair ||
+        job.status !== "submitted" ||
+        revision !== job.revision
+      )
+        return conflict(
+          "Review the current submitted Plan repair before returning it.",
+        );
+      const feedback = {
+        revision,
+        reason,
+        resultHash: job.review_hash ?? job.result_hash,
+      };
+      const returned = (
+        await tx.query<typeof job>(
+          "update drafting_jobs set status='queued', revision=revision+1, repair_feedback=$2::jsonb, updated_at=$3 where id=$1 returning *",
+          [job.id, JSON.stringify(feedback), deps.clock.now()],
+        )
+      ).rows[0]!;
+      await finishInbox(tx, deps, job.id);
+      await auditJob(tx, deps, actor, returned, "returned", revision, reason);
+      return { status: 200, value: { job: publicDraftingJob(returned) } };
+    }
+    const successor =
+      job.context_bundle.authoringFollowUp &&
+      [...jobs]
+        .reverse()
+        .find(
+          (candidate) =>
+            candidate.context_bundle.planRepair?.recovery?.draftIds.includes(
+              job.id,
+            ) && candidate.status !== "cancelled",
+        );
+    if (
+      successor &&
+      ["claim", "accept-preview", "accept", "submit"].includes(action)
+    )
+      return conflict(
+        "This lane draft was included in Plan repair " + successor.id + ".",
+      );
     const historicalPlan =
       job.status === "cancelled" &&
       !!job.reconciliationHeadId &&
@@ -559,6 +642,10 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
                     ? releaseReasons[body.reason]
                     : undefined,
                 );
+      if (isAuthoringJob(updated) && updated.status === "submitted") {
+        Object.assign(job, updated);
+        await syncRepairs();
+      }
       const publicJob = publicDraftingJob(updated);
       if (action === "submit") {
         const resultPath = `job.${publicJob.currentResultPath}`;
@@ -592,9 +679,26 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         "Only a signed-in person accepts or discards suggestions",
       );
     const accept = action.startsWith("accept");
+    const planRepair = job.context_bundle.planRepair;
+    const resultFields = draftResultFields(job.kind, !!planRepair);
+    if (accept && planRepair) {
+      if (job.reconciliationHeadId || job.status === "cancelled")
+        return conflict("Request an agent repair against the current Plan.");
+      if (job.waveReportsOpen)
+        return conflict(
+          "A source report is being edited. Review the repair after the Agent finishes.",
+        );
+      if (
+        canonicalHash({ plan: body.plan, resolutions: body.resolutions }) !==
+        (job.review_hash ?? job.result_hash)
+      )
+        return conflict(
+          "Review the exact agent proposal or send it back for revision.",
+        );
+    }
     fields(body, [
       "revision",
-      ...(accept ? draftResultFields(job.kind) : ["reason"]),
+      ...(accept ? resultFields : ["reason"]),
       ...(accept && job.kind === "draft-plan" ? ["reconciliation"] : []),
       "confirmationHash",
       "confirmed",
@@ -614,7 +718,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       job.review_hash !== null &&
       canonicalHash(
         Object.fromEntries(
-          draftResultFields(job.kind)
+          resultFields
             .filter((key) => body[key] !== undefined)
             .map((key) => [key, body[key]]),
         ),
@@ -644,9 +748,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       job,
       accept ? "accept" : "reject",
       input.blobs,
-      Object.fromEntries(
-        draftResultFields(job.kind).map((key) => [key, body[key]]),
-      ),
+      Object.fromEntries(resultFields.map((key) => [key, body[key]])),
       accept ? undefined : textInput(body.reason, "reason"),
       reconciliation,
     );
@@ -669,6 +771,26 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       input.blobs,
       input.config,
     );
+    if (isAuthoringJob(decided)) {
+      Object.assign(job, decided);
+      await syncRepairs();
+    } else if (decided.context_bundle.planRepair) {
+      const refreshed = await reconcileDraftingJobs(
+        tx,
+        deps,
+        actor,
+        workflowId,
+        versionId,
+      );
+      await syncWavePlanRepairs(
+        tx,
+        deps,
+        actor,
+        versionId,
+        refreshed.current,
+        refreshed.jobs,
+      );
+    }
     return { status: 200, value: { job: publicDraftingJob(decided) } };
   });
   reply.json(result.status, portableAuthoringHistory(result.value).snapshot);

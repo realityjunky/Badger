@@ -113,6 +113,7 @@ export type DraftingBundle = Awaited<
   ReturnType<typeof draftingContext>
 >["bundle"] & {
   promptTemplate?: PromptTemplateSnapshot;
+  planRepair?: import("@realityjunky/badger").PlanRepair;
   authoringFollowUp?: {
     jobId: string;
     packageId: string;

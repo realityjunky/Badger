@@ -5,12 +5,10 @@ import type {
   PlanComposition,
   PlanView,
 } from "../../api/plans.js";
-import type {
-  PlanDraftingJob,
-  PlanReconciliation,
-} from "../../api/drafting-jobs.js";
+import type { PlanDraftingJob } from "../../api/drafting-jobs.js";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { PlanRepairReview } from "./PlanRepairReview.js";
 import { PlanContent } from "./PlanContent.js";
 
 export function PlanEditor({
@@ -18,8 +16,6 @@ export function PlanEditor({
   path,
   view,
   initialPlan,
-  reconciliation,
-  combinedPlanHash,
   job,
   onClose,
   onSaved,
@@ -28,19 +24,17 @@ export function PlanEditor({
   path: string;
   view: PlanView;
   initialPlan: FactoryPlan;
-  reconciliation?: PlanReconciliation;
-  combinedPlanHash?: string;
   job?: PlanDraftingJob;
   onClose(): void;
   onSaved(): void;
 }) {
   const { t } = useI18n();
   const [text, setText] = useState(JSON.stringify(initialPlan, null, 2));
-  const [editCombined, setEditCombined] = useState(false);
-  const reviewedReconciliation = reconciliation && {
-    ...reconciliation,
-    ...(editCombined && { editedFromHash: combinedPlanHash }),
-  };
+  const repair = job?.planRepair;
+  const resolutions = (job?.review?.result ?? job?.result)?.resolutions;
+  const basePlan = view.versions.find(
+    (version) => version.id === repair?.basePlanVersionId,
+  )?.snapshot.plan;
   const [binding] = useState(() => ({
     dossierHash: view.dossierHash,
     expectedVersionId: view.headVersionId,
@@ -121,9 +115,7 @@ export function PlanEditor({
       }>(basePath, `${path}/drafting-jobs/${job.id}/accept-preview`, "POST", {
         revision: job.revision,
         plan: composition.snapshot.plan,
-        ...(reviewedReconciliation && {
-          reconciliation: reviewedReconciliation,
-        }),
+        ...(resolutions && { resolutions }),
       });
       confirmationHash = result.preview.confirmationHash;
     }
@@ -144,9 +136,7 @@ export function PlanEditor({
         ? {
             revision: job.revision,
             plan,
-            ...(reviewedReconciliation && {
-              reconciliation: reviewedReconciliation,
-            }),
+            ...(resolutions && { resolutions }),
             confirmed: true,
             confirmationHash: review.confirmationHash,
             requestId: review.requestId,
@@ -173,28 +163,35 @@ export function PlanEditor({
         closable={!busy}
         maskClosable={!busy}
       >
-        <p>{t(reconciliation ? "plan.reconciledHelp" : "plan.editorHelp")}</p>
-        {combinedPlanHash && !editCombined && (
-          <Button disabled={busy} onClick={() => setEditCombined(true)}>
-            {t("plan.editCombined")}
-          </Button>
+        {repair && resolutions && basePlan ? (
+          <PlanRepairReview
+            repair={repair}
+            resolutions={resolutions}
+            before={basePlan}
+            after={initialPlan}
+          />
+        ) : (
+          <p>{t("plan.editorHelp")}</p>
         )}
-        <label className="field-label" htmlFor="factory-plan-json">
-          {t("plan.json")}
-        </label>
-        <Input.TextArea
-          id="factory-plan-json"
-          value={text}
-          rows={18}
-          spellCheck={false}
-          disabled={busy}
-          readOnly={!!reconciliation && !editCombined}
-          onChange={(event) => {
-            setText(event.target.value);
-            setComposition(null);
-            setValidating(true);
-          }}
-        />
+        {!repair && (
+          <>
+            <label className="field-label" htmlFor="factory-plan-json">
+              {t("plan.json")}
+            </label>
+            <Input.TextArea
+              id="factory-plan-json"
+              value={text}
+              rows={18}
+              spellCheck={false}
+              disabled={busy}
+              onChange={(event) => {
+                setText(event.target.value);
+                setComposition(null);
+                setValidating(true);
+              }}
+            />
+          </>
+        )}
         <div role="status" aria-live="polite" className="plan-validation">
           {validating ? (
             <Spin size="small" aria-label={t("plan.validating")} />

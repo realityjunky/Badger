@@ -1,4 +1,5 @@
-import { canonicalHash } from "@realityjunky/badger";
+import { canonicalHash, composeFactoryPlan } from "@realityjunky/badger";
+import { RequestError } from "../http/errors.js";
 import type { Queryable } from "../database/database.js";
 import type { ServiceDependencies } from "../dependencies.js";
 import type { BlobStore } from "../skills/blobs.js";
@@ -32,6 +33,18 @@ export async function validateDraftingSubmission(
     );
   }
   if (isAuthoringJob(job)) validateLaneResult(job, validated);
+  if (job.context_bundle.planRepair && "plan" in validated) {
+    const { findings } = composeFactoryPlan(
+      job.context_bundle.planning!.input,
+      validated.plan,
+    );
+    if (findings.length)
+      throw new RequestError(
+        409,
+        "Repair the kernel's plan findings before handing off the combined Plan.",
+        { findings },
+      );
+  }
   return validated;
 }
 

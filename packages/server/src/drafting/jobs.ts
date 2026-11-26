@@ -10,6 +10,9 @@ import {
   canonicalHash,
   composeFactoryPlan,
   factoryPlanDraftSchema,
+  planRepairSchema,
+  planRepairItems,
+  type PlanRepair,
 } from "@realityjunky/badger";
 import { storePlan } from "../plans.js";
 import { recordAudit, type WriteContext } from "../audit.js";
@@ -72,6 +75,13 @@ export interface DraftingJobRow {
   context_bundle: DraftingBundle;
   context_hash: string;
   reconciliationHeadId?: string;
+  waveReportsOpen?: boolean;
+  repair_feedback: {
+    responded?: boolean;
+    revision: number;
+    reason: string;
+    resultHash: string;
+  } | null;
   input_hash: string;
   output_schema: object;
   status:
@@ -94,8 +104,16 @@ export interface DraftingJobRow {
   decision: unknown;
   created_at: string | Date;
 }
+function hasReviewableResult(job: DraftingJobRow) {
+  return (
+    job.result !== null &&
+    (!job.repair_feedback || job.repair_feedback.responded === true)
+  );
+}
+
 export function publicDraftingJob(row: DraftingJobRow) {
   const followUp = row.context_bundle.authoringFollowUp;
+  const repair = row.context_bundle.planRepair;
   return {
     id: row.id,
     workflowVersionId: row.workflow_version_id,
@@ -115,6 +133,17 @@ export function publicDraftingJob(row: DraftingJobRow) {
     contextHash: row.context_hash,
     ...(row.reconciliationHeadId && {
       reconciliationHeadId: row.reconciliationHeadId,
+    }),
+    ...(repair && {
+      planRepair: {
+        packageId: repair.packageId,
+        wave: repair.wave,
+        basePlanVersionId: repair.basePlan.id,
+        reportIds: repair.reports.map((report) => report.jobId),
+        sourceDraftIds: repair.recovery?.draftIds ?? [],
+        items: planRepairItems(repair),
+      },
+      feedback: row.repair_feedback,
     }),
     currentResultHash: row.review_hash ?? row.result_hash,
     currentResultPath:
@@ -220,7 +249,7 @@ export async function readDraftingJobs(tx: Queryable, versionId: string) {
   ).rows;
 }
 
-async function finishInbox(
+export async function finishInbox(
   tx: Queryable,
   deps: ServiceDependencies,
   id: string,
@@ -294,9 +323,12 @@ export async function reconcileDraftingJobs(
   const jobs = await readDraftingJobs(tx, versionId);
   for (const job of jobs) {
     const followUp =
-      job.kind === "draft-plan" && job.context_bundle.authoringFollowUp;
+      job.kind === "draft-plan" &&
+      (job.context_bundle.authoringFollowUp ?? job.context_bundle.planRepair);
     const historical =
-      job.status === "cancelled" && followUp && job.result !== null;
+      job.status === "cancelled" &&
+      followUp &&
+      (job.result !== null || !!job.context_bundle.planRepair);
     if (!historical && !["queued", "claimed", "submitted"].includes(job.status))
       continue;
     let inputs = current.bundle;
@@ -321,7 +353,8 @@ export async function reconcileDraftingJobs(
     if (
       followUp &&
       planning?.basePlanVersionId &&
-      (historical || planning.basePlanVersionId !== followUp.basePlan.id) &&
+      ((historical && !!job.context_bundle.authoringFollowUp) ||
+        planning.basePlanVersionId !== followUp.basePlan.id) &&
       job.context_bundle.planning?.basePlanVersionId === followUp.basePlan.id &&
       current.planDossierHash === planning.input.dossierHash &&
       !legacy
@@ -344,7 +377,7 @@ export async function reconcileDraftingJobs(
         : job.input_hash;
     const changed =
       legacy ||
-      (!job.reconciliationHeadId &&
+      ((!job.reconciliationHeadId || !!job.context_bundle.planRepair) &&
         !isAuthoringJob(job) &&
         inputHash !== draftingInputHash(inputs, target));
     const expired =
@@ -359,14 +392,18 @@ export async function reconcileDraftingJobs(
        lease_kind = null, lease_activity_at = null, updated_at = $3 where id = $1 returning *`,
         [
           job.id,
-          changed ? "cancelled" : job.result === null ? "queued" : "submitted",
+          changed
+            ? "cancelled"
+            : hasReviewableResult(job)
+              ? "submitted"
+              : "queued",
           deps.clock.now(),
         ],
       )
     ).rows[0]!;
     Object.assign(job, updated);
     if (changed) await finishInbox(tx, deps, job.id);
-    else if (job.result !== null) await openDraftingInbox(tx, deps, job);
+    else if (job.status === "submitted") await openDraftingInbox(tx, deps, job);
     await auditJob(
       tx,
       deps,
@@ -387,7 +424,7 @@ export async function createDraftingJob(
   versionId: string,
   input: DraftingTarget,
   current: Awaited<ReturnType<typeof draftingContext>>,
-  authoringFollowUp?: DraftingBundle["authoringFollowUp"],
+  planRepair?: PlanRepair,
 ) {
   if (input.kind === "draft-plan" && !current.bundle.planning)
     throw new RequestError(
@@ -435,7 +472,7 @@ export async function createDraftingJob(
     );
   const bundle = {
     ...current.bundle,
-    ...(authoringFollowUp && { authoringFollowUp }),
+    ...(planRepair && { planRepair }),
     promptTemplate: await readPromptTemplate(tx, input.kind),
   };
   const job = (
@@ -452,9 +489,11 @@ export async function createDraftingJob(
         JSON.stringify(bundle),
         canonicalHash(bundle),
         JSON.stringify(
-          input.kind === "draft-plan"
-            ? factoryPlanDraftSchema(current.bundle.planning!.input)
-            : DRAFT_SCHEMAS[input.kind],
+          planRepair
+            ? planRepairSchema(current.bundle.planning!.input, planRepair)
+            : input.kind === "draft-plan"
+              ? factoryPlanDraftSchema(current.bundle.planning!.input)
+              : DRAFT_SCHEMAS[input.kind],
         ),
         deps.clock.now(),
         input.skillId,
@@ -545,6 +584,14 @@ export async function submitDraftingJob(
   } else {
     saved = await saveDraftingReview(tx, deps, actor, job, result, blobs);
   }
+  if (job.repair_feedback && !job.repair_feedback.responded) {
+    saved = (
+      await tx.query<DraftingJobRow>(
+        "update drafting_jobs set repair_feedback=repair_feedback || '{\"responded\":true}'::jsonb where id=$1 returning *",
+        [job.id],
+      )
+    ).rows[0]!;
+  }
   return keepClaim
     ? renewDraftingJob(tx, deps, saved, true)
     : finishDraftingJob(
@@ -579,7 +626,7 @@ export async function finishDraftingJob(
   job: DraftingJobRow,
   reason = "The editor finished the drafting session",
 ) {
-  if (job.result === null)
+  if (!hasReviewableResult(job))
     throw new RequestError(
       409,
       "Submit suggestions before finishing this session",
@@ -605,7 +652,7 @@ export async function releaseDraftingJob(
   job: DraftingJobRow,
   reason = "The claim was released; saved suggestions were preserved",
 ) {
-  if (job.result !== null)
+  if (hasReviewableResult(job))
     return finishDraftingJob(tx, deps, actor, job, reason);
   const released = (
     await tx.query<DraftingJobRow>(

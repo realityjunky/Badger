@@ -1,5 +1,8 @@
 import { assemblePrompt, packagedPromptTemplate } from "../prompt-templates.js";
-import { authoringContentScaffold } from "@realityjunky/badger";
+import {
+  authoringContentScaffold,
+  planRepairItems,
+} from "@realityjunky/badger";
 import { draftingLanguageInstructions } from "@realityjunky/badger/prompts";
 import { publicDraftingJob, type DraftingJobRow } from "./jobs.js";
 import { RequestError } from "../http/errors.js";
@@ -12,6 +15,7 @@ export function draftingJobPrompt(
     job.context_bundle.promptTemplate ?? packagedPromptTemplate(job.kind);
   const target = publicDraftingJob(job);
   const outputLocale = target.outputLocale;
+  const planRepair = job.context_bundle.planRepair;
   if (outputLocale === null)
     throw new RequestError(
       409,
@@ -22,6 +26,11 @@ export function draftingJobPrompt(
       template,
       prompt: [
         `${job.status === "submitted" ? "Continue editing this" : "Process this queued"} Badger ${job.kind} job using the connected Badger MCP.`,
+        ...(planRepair
+          ? [
+              `Prepare one Plan repair for the ${planRepair.wave} reports from ${planRepair.reports.map((report) => report.lane).join(", ")}. Resolve overlaps and account for every finding for the Engineer's review.`,
+            ]
+          : []),
         `Call claim_job with these arguments:\n${JSON.stringify({
           workflowId: job.context_bundle.workflow.id,
           versionId: job.workflow_version_id,
@@ -77,6 +86,19 @@ export function draftingJobPrompt(
         ...(job.kind === "draft-plan"
           ? [
               "Use scoped Decision Nodes for mandatory human approvals. A Node can declare approvalRequirements with a Decision ID, approving choice ID and exact required Run or Cycle artifact IDs. Use a guardrail verification receipt for automated checks. With a trusted executable verifier, pin its SHA-256 and public key in verification.verifierPin. Report a missing verifier or unsupported precondition as a blocker. Do not invent a host hook or mark an unimplemented check as enforced.",
+            ]
+          : []),
+        ...(planRepair
+          ? [
+              "Read context.json at planRepair. Start from recovery.startingPlan when present, otherwise basePlan.plan. The base is the current saved Plan. Inspect every source report, preserve compatible changes, and resolve competing wording or structure using the pinned evidence. Never guess missing evidence.",
+              "Submit one complete Plan and a resolutions object keyed by the following item IDs. For each item, explain the specific change and its Plan location, why existing coverage suffices, or which evidence is missing. Use addressed, already-covered or needs-evidence. Validate the combined Plan before finishing.",
+              JSON.stringify(planRepairItems(planRepair)),
+              ...(job.repair_feedback
+                ? [
+                    "Revise the latest saved result.json in response to the human review: " +
+                      job.repair_feedback.reason,
+                  ]
+                : []),
             ]
           : []),
         ...(followUp
