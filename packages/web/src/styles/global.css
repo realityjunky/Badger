@@ -2644,8 +2644,14 @@ button.rail-link {
     gap: 12px;
   }
 }
-.dossier-views,
-.planning-tabs {
+.plan-action-info {
+  justify-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
+}
+.proposal-action-controls details > button {
+  margin-block-start: 8px;
+}
+.dossier-views {
   min-width: 0;
 }
 .dossier-json {

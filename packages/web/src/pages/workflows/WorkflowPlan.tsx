@@ -30,6 +30,8 @@ import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
 import { PlanContent, PlanTabs } from "./PlanContent.js";
 import { PlanEditor } from "./PlanEditor.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
+import { WorkflowProposal } from "./WorkflowProposal.js";
+import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
 import { selectedWorkflowTab } from "./WorkflowTabs.js";
 import { AgentPromptButton } from "../../components/AgentPromptButton.js";
 import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
@@ -48,7 +50,7 @@ export function WorkflowPlan({
   const { connected, notice } = useLiveUpdates();
   const location = useLocation();
   const navigate = useNavigate();
-  const active = selectedWorkflowTab(location) === "plan";
+  const active = ["plan", "proposal"].includes(selectedWorkflowTab(location));
   const section = useRef<HTMLElement>(null);
   const selectedDraftRow = useRef<HTMLLIElement>(null);
   const [view, setView] = useState<PlanView | null>(null);
@@ -153,7 +155,7 @@ export function WorkflowPlan({
     return () => window.clearInterval(timer);
   }, [active, connected]);
   useEffect(() => {
-    if (location.hash === "#plan" && view)
+    if (location.hash === "#plan" && !params.has("planTab") && view)
       section.current?.scrollIntoView({ block: "start" });
   }, [location.key, Boolean(view)]);
   useEffect(() => {
@@ -264,13 +266,39 @@ export function WorkflowPlan({
   );
   return (
     <WorkflowPanel
-      title={t("plan.title")}
+      title={t("stage.planProposal")}
+      hideHeading
+      showGuidance={false}
       ref={section}
       id="plan"
       data-testid="workflow-plan"
       aria-labelledby="plan-title"
-      actions={
-        <Space wrap>
+    >
+      <div className="proposal-toolbar">
+        <StageReviewGuidance stage="plan-proposal" />
+        <Space size={2}>
+          <Tooltip
+            title={t("proposal.description")}
+            trigger={["hover", "focus", "click"]}
+          >
+            <Button
+              type="text"
+              aria-label={t("proposal.about")}
+              icon={<InfoCircleOutlined aria-hidden="true" />}
+            />
+          </Tooltip>
+          <ReloadRecordsButton
+            disabled={busy}
+            onClick={() => {
+              setFailure(null);
+              setRefresh((value) => value + 1);
+            }}
+          />
+        </Space>
+      </div>
+      <section className="proposal-action-row" aria-label={t("plan.title")}>
+        <div className="proposal-action-controls">
+          <h3>{t("plan.title")}</h3>
           {view?.skeleton && detail.capabilities.editPlan && (
             <>
               <Space size={4} align="start">
@@ -305,202 +333,223 @@ export function WorkflowPlan({
               </Button>
             </>
           )}
-          <ReloadRecordsButton
-            disabled={busy}
-            onClick={() => {
-              setFailure(null);
-              setRefresh((r) => r + 1);
-            }}
-          />
-        </Space>
-      }
-    >
-      {!selectedDraft && (
-        <AuthoringStageFinding basePath={basePath} path={path} stage="plan" />
-      )}
-      {failure && !deleting && <Alert type="error" showIcon title={failure} />}
-      {!view && !failure && <Spin aria-label={t("common.loading")} />}
-      {view && (
-        <>
-          {!view.skeleton && (
-            <Alert
-              type="warning"
-              showIcon
-              title={t("plan.needDossier")}
-              description={<Link to="#dossier">{t("dossier.title")}</Link>}
+          {selected &&
+            detail.capabilities.approvePlan &&
+            !superseded &&
+            !approved && (
+              <Button
+                type="primary"
+                loading={busy}
+                onClick={() => void run(previewApproval)}
+              >
+                {t("plan.reviewApproval")}
+              </Button>
+            )}
+        </div>
+        <div className="proposal-action-info plan-action-info">
+          {!selectedDraft && (
+            <AuthoringStageFinding
+              basePath={basePath}
+              path={path}
+              stage="plan"
             />
           )}
-          {selected && (
+          {failure && !deleting && (
+            <Alert type="error" showIcon title={failure} />
+          )}
+          {!view && !failure && <Spin aria-label={t("common.loading")} />}
+          {view && (
             <>
-              <Space wrap className="dossier-version-heading">
-                <Select
-                  aria-label={t("plan.version")}
-                  value={selected.id}
-                  options={view.versions.map((v) => ({
-                    value: v.id,
-                    label: format("plan.versionNumber", { number: v.number }),
-                  }))}
-                  onChange={(id) => {
-                    const params = new URLSearchParams(location.search);
-                    params.set("planVersion", id);
-                    navigate({ search: params.toString(), hash: "#plan" });
-                  }}
-                />
-                <Tag
-                  color={
-                    superseded ? "warning" : approved ? "success" : "processing"
-                  }
-                >
-                  {t(
-                    superseded
-                      ? "ledger.state.superseded"
-                      : approved
-                        ? "plan.approved"
-                        : "dossier.awaiting",
-                  )}
-                </Tag>
-                {detail.capabilities.approvePlan &&
-                  !superseded &&
-                  !approved && (
-                    <Button
-                      type="primary"
-                      loading={busy}
-                      onClick={() => void run(previewApproval)}
-                    >
-                      {t("plan.reviewApproval")}
-                    </Button>
-                  )}
-              </Space>
-              {superseded && (
+              {!view.skeleton && (
                 <Alert
                   type="warning"
                   showIcon
-                  title={t("plan.supersededHelp")}
+                  title={t("plan.needDossier")}
+                  description={<Link to="#dossier">{t("dossier.title")}</Link>}
                 />
               )}
-              <ConfirmationHistory
-                confirmations={view.confirmations}
-                bound={{ name: "plan", hash: selected.hash }}
-              />
-              {approved && <Link to="#proposal">{t("proposal.title")}</Link>}
+              {selected && (
+                <>
+                  <Space wrap className="dossier-version-heading">
+                    <Select
+                      aria-label={t("plan.version")}
+                      value={selected.id}
+                      options={view.versions.map((v) => ({
+                        value: v.id,
+                        label: format("plan.versionNumber", {
+                          number: v.number,
+                        }),
+                      }))}
+                      onChange={(id) => {
+                        const params = new URLSearchParams(location.search);
+                        params.set("planVersion", id);
+                        navigate({ search: params.toString(), hash: "#plan" });
+                      }}
+                    />
+                    <Tag
+                      color={
+                        superseded
+                          ? "warning"
+                          : approved
+                            ? "success"
+                            : "processing"
+                      }
+                    >
+                      {t(
+                        superseded
+                          ? "ledger.state.superseded"
+                          : approved
+                            ? "plan.approved"
+                            : "dossier.awaiting",
+                      )}
+                    </Tag>
+                  </Space>
+                  {superseded && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      title={t("plan.supersededHelp")}
+                    />
+                  )}
+                  <ConfirmationHistory
+                    confirmations={view.confirmations}
+                    bound={{ name: "plan", hash: selected.hash }}
+                  />
+                </>
+              )}
+              <PlanTabs version={selected} tab={tab} onTab={selectTab}>
+                {detail.capabilities.editPlan && jobs.length > 0 ? (
+                  <ul className="questionnaire-concerns">
+                    {visibleJobs.map((job) => (
+                      <li
+                        key={job.id}
+                        ref={job.id === draftId ? selectedDraftRow : undefined}
+                      >
+                        {job.id === draftId && findingId ? (
+                          <AuthoringStageFinding
+                            basePath={basePath}
+                            path={path}
+                            stage="plan"
+                          />
+                        ) : (
+                          job.authoringFollowUp && (
+                            <Alert
+                              type="info"
+                              title={format("authoring.findingOrigin", {
+                                lane: job.authoringFollowUp.lane,
+                              })}
+                              description={
+                                job.authoringFollowUp.action.requirement
+                              }
+                            />
+                          )
+                        )}
+                        <Space wrap>
+                          <span className="plan-draft-id">
+                            {t("plan.draft")} <code>{job.id}</code>
+                          </span>
+                          <Tag>{t(`drafting.state.${job.status}`)}</Tag>
+                          {["queued", "submitted"].includes(job.status) &&
+                            detail.capabilities.editPlan && (
+                              <AgentPromptButton
+                                basePath={basePath}
+                                path={`${path}/drafting-jobs/${job.id}/prompt`}
+                              />
+                            )}
+                          {job.status === "submitted" && (
+                            <>
+                              <Button
+                                disabled={busy || !view.skeleton}
+                                onClick={() =>
+                                  setEditing({
+                                    plan: structuredClone(
+                                      (job.review?.result ?? job.result!).plan,
+                                    ),
+                                    job,
+                                  })
+                                }
+                              >
+                                {t("plan.reviewSuggestion")}
+                              </Button>
+                              <Button
+                                disabled={busy}
+                                onClick={() =>
+                                  setDiscard({
+                                    job,
+                                    reason: "",
+                                    requestId: crypto.randomUUID(),
+                                  })
+                                }
+                              >
+                                {t("drafting.discard")}
+                              </Button>
+                            </>
+                          )}
+                          {job.status !== "claimed" &&
+                            job.status !== "accepted" && (
+                              <Button
+                                danger
+                                disabled={busy}
+                                onClick={() => {
+                                  setFailure(null);
+                                  setDeleting(job);
+                                }}
+                              >
+                                {t("plan.deleteDraft")}
+                              </Button>
+                            )}
+                        </Space>
+                        {job.status === "claimed" &&
+                          (job.review?.result ?? job.result) && (
+                            <p className="muted" role="status">
+                              {t("plan.draftSaved")}
+                            </p>
+                          )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-state">
+                    {t(
+                      detail.capabilities.editPlan
+                        ? "plan.noDrafts"
+                        : "plan.draftsRestricted",
+                    )}
+                  </p>
+                )}
+              </PlanTabs>
+              {editing && (
+                <PlanEditor
+                  key={editing.job?.id ?? "plan-editor"}
+                  basePath={basePath}
+                  path={path}
+                  view={view}
+                  initialPlan={editing.plan}
+                  job={editing.job}
+                  onClose={() => setEditing(null)}
+                  onSaved={() => {
+                    setEditing(null);
+                    void changed();
+                  }}
+                />
+              )}
             </>
           )}
-          <PlanTabs version={selected} tab={tab} onTab={selectTab}>
-            {detail.capabilities.editPlan && jobs.length > 0 ? (
-              <ul className="questionnaire-concerns">
-                {visibleJobs.map((job) => (
-                  <li
-                    key={job.id}
-                    ref={job.id === draftId ? selectedDraftRow : undefined}
-                  >
-                    {job.id === draftId && findingId ? (
-                      <AuthoringStageFinding
-                        basePath={basePath}
-                        path={path}
-                        stage="plan"
-                      />
-                    ) : (
-                      job.authoringFollowUp && (
-                        <Alert
-                          type="info"
-                          title={format("authoring.findingOrigin", {
-                            lane: job.authoringFollowUp.lane,
-                          })}
-                          description={job.authoringFollowUp.action.requirement}
-                        />
-                      )
-                    )}
-                    <Space wrap>
-                      <span className="plan-draft-id">
-                        {t("plan.draft")} <code>{job.id}</code>
-                      </span>
-                      <Tag>{t(`drafting.state.${job.status}`)}</Tag>
-                      {["queued", "submitted"].includes(job.status) &&
-                        detail.capabilities.editPlan && (
-                          <AgentPromptButton
-                            basePath={basePath}
-                            path={`${path}/drafting-jobs/${job.id}/prompt`}
-                          />
-                        )}
-                      {job.status === "submitted" && (
-                        <>
-                          <Button
-                            disabled={busy || !view.skeleton}
-                            onClick={() =>
-                              setEditing({
-                                plan: structuredClone(
-                                  (job.review?.result ?? job.result!).plan,
-                                ),
-                                job,
-                              })
-                            }
-                          >
-                            {t("plan.reviewSuggestion")}
-                          </Button>
-                          <Button
-                            disabled={busy}
-                            onClick={() =>
-                              setDiscard({
-                                job,
-                                reason: "",
-                                requestId: crypto.randomUUID(),
-                              })
-                            }
-                          >
-                            {t("drafting.discard")}
-                          </Button>
-                        </>
-                      )}
-                      {job.status !== "claimed" &&
-                        job.status !== "accepted" && (
-                          <Button
-                            danger
-                            disabled={busy}
-                            onClick={() => {
-                              setFailure(null);
-                              setDeleting(job);
-                            }}
-                          >
-                            {t("plan.deleteDraft")}
-                          </Button>
-                        )}
-                    </Space>
-                    {job.status === "claimed" &&
-                      (job.review?.result ?? job.result) && (
-                        <p className="muted" role="status">
-                          {t("plan.draftSaved")}
-                        </p>
-                      )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="empty-state">
-                {t(
-                  detail.capabilities.editPlan
-                    ? "plan.noDrafts"
-                    : "plan.draftsRestricted",
-                )}
-              </p>
-            )}
-          </PlanTabs>
-          {editing && (
-            <PlanEditor
-              key={editing.job?.id ?? "plan-editor"}
-              basePath={basePath}
-              path={path}
-              view={view}
-              initialPlan={editing.plan}
-              job={editing.job}
-              onClose={() => setEditing(null)}
-              onSaved={() => {
-                setEditing(null);
-                void changed();
-              }}
-            />
-          )}
-        </>
-      )}
+        </div>
+      </section>
+      <WorkflowProposal
+        basePath={basePath}
+        detail={detail}
+        active={active}
+        planRefresh={refresh}
+        approvedPlanHash={approved ? selected?.hash : undefined}
+        historical={
+          !!selected &&
+          !!view?.headVersionId &&
+          selected.id !== view.headVersionId
+        }
+        onChanged={onChanged}
+      />
       <Modal
         open={approval !== null}
         width={900}

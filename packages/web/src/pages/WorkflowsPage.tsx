@@ -1,4 +1,4 @@
-import { Alert, Button, Select, Space, Tabs, Tag } from "antd";
+import { Alert, Button, Select, Space, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -40,7 +40,6 @@ import { WorkflowDossier } from "./workflows/WorkflowDossier.js";
 import { WorkflowPlan } from "./workflows/WorkflowPlan.js";
 import { WorkflowPublication } from "./workflows/WorkflowPublication.js";
 import { WorkflowPackage } from "./workflows/WorkflowPackage.js";
-import { WorkflowProposal } from "./workflows/WorkflowProposal.js";
 import { WorkflowNotifications } from "./workflows/WorkflowNotifications.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 
@@ -503,37 +502,10 @@ export function WorkflowsPage() {
                       key: "plan",
                       label: t("stage.planProposal"),
                       children: (
-                        <Tabs
-                          className="planning-tabs"
-                          animated={false}
-                          activeKey={tab === "proposal" ? "proposal" : "plan"}
-                          onChange={(key) =>
-                            navigate({ search: location.search, hash: key })
-                          }
-                          items={[
-                            {
-                              key: "plan",
-                              label: t("plan.title"),
-                              children: (
-                                <WorkflowPlan
-                                  basePath={basePath}
-                                  detail={versionResources}
-                                  onChanged={reload}
-                                />
-                              ),
-                            },
-                            {
-                              key: "proposal",
-                              label: t("proposal.title"),
-                              children: (
-                                <WorkflowProposal
-                                  basePath={basePath}
-                                  detail={versionResources}
-                                  onChanged={reload}
-                                />
-                              ),
-                            },
-                          ]}
+                        <WorkflowPlan
+                          basePath={basePath}
+                          detail={versionResources}
+                          onChanged={reload}
                         />
                       ),
                     },

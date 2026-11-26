@@ -26,6 +26,7 @@ export interface ProposalView {
   currentState: {
     hash: string;
     proposalHash: string;
+    proposalConfirmationId: string;
     planVersionHash: string;
     revision: number;
     initializedAt: string;

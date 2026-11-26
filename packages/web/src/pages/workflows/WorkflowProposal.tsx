@@ -1,5 +1,4 @@
-import { InfoCircleOutlined } from "@ant-design/icons";
-import { Alert, Button, Modal, Space, Spin, Tag, Tooltip } from "antd";
+import { Alert, Button, Modal, Spin, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { ProposalView } from "../../api/proposals.js";
@@ -8,21 +7,26 @@ import type {
   GatePreview,
   WorkflowVersionDetail,
 } from "../../api/workflows.js";
-import { ReloadRecordsButton } from "../../components/ReloadRecordsButton.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { useInbox } from "../../inbox/InboxContext.js";
 import { ConfirmationHistory } from "../../components/ConfirmationHistory.js";
-import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
-import { WorkflowPanel } from "./WorkflowPanel.js";
 import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
 
 export function WorkflowProposal({
   basePath,
   detail,
+  active,
+  planRefresh,
+  approvedPlanHash,
+  historical,
   onChanged,
 }: {
   basePath: string;
   detail: WorkflowVersionDetail;
+  active: boolean;
+  planRefresh: number;
+  approvedPlanHash?: string;
+  historical: boolean;
   onChanged(): void;
 }) {
   const { t, locale } = useI18n();
@@ -42,6 +46,7 @@ export function WorkflowProposal({
   } | null>(null);
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
   useEffect(() => {
+    if (!active) return;
     const controller = new AbortController();
     void questionnaireRequest<ProposalView>(
       basePath,
@@ -67,9 +72,18 @@ export function WorkflowProposal({
       },
     );
     return () => controller.abort();
-  }, [basePath, path, detail.version.revision, refresh]);
+  }, [
+    active,
+    basePath,
+    path,
+    detail.version.revision,
+    refresh,
+    planRefresh,
+    approvedPlanHash,
+  ]);
   useEffect(() => {
     if (
+      !active ||
       !view?.jobs.some(
         (job) => job.status === "queued" || job.status === "running",
       )
@@ -77,7 +91,7 @@ export function WorkflowProposal({
       return;
     const timer = setTimeout(() => setRefresh((value) => value + 1), 1000);
     return () => clearTimeout(timer);
-  }, [view]);
+  }, [view, active]);
   useEffect(() => {
     if (location.hash === "#proposal" && view)
       section.current?.scrollIntoView({ block: "start" });
@@ -160,38 +174,35 @@ export function WorkflowProposal({
   );
   const reviewed = review?.view.proposal;
   const replacing = review?.kind === "initialize" && !!review.view.currentState;
+  const planReady =
+    !!approvedPlanHash && approvedPlanHash === view?.planVersionHash;
+  const canInitialize = planReady && approved && !!proposal?.canInitialize;
+  const alreadyInitialized =
+    canInitialize &&
+    !!view?.currentState &&
+    view.currentState.planVersionHash === approvedPlanHash &&
+    view.currentState.proposalHash === proposal?.proposalHash &&
+    view.currentState.proposalConfirmationId === view.confirmation?.id;
+  const initializationButton = detail.capabilities.initialize && (
+    <Button
+      type={alreadyInitialized ? "default" : "primary"}
+      danger={!!view?.currentState}
+      disabled={busy || pending || !canInitialize}
+      onClick={() =>
+        view &&
+        setReview({ kind: "initialize", view, requestId: crypto.randomUUID() })
+      }
+    >
+      {t(view?.currentState ? "proposal.replace" : "proposal.initialize")}
+    </Button>
+  );
   return (
-    <WorkflowPanel
-      title={t("proposal.title")}
-      hideHeading
-      showGuidance={false}
+    <section
       ref={section}
       id="proposal"
       data-testid="workflow-proposal"
-      aria-labelledby="proposal-title"
+      aria-label={t("proposal.title")}
     >
-      <div className="proposal-toolbar">
-        <StageReviewGuidance stage="plan-proposal" />
-        <Space size={2}>
-          <Tooltip
-            title={t("proposal.description")}
-            trigger={["hover", "focus", "click"]}
-          >
-            <Button
-              type="text"
-              aria-label={t("proposal.about")}
-              icon={<InfoCircleOutlined aria-hidden="true" />}
-            />
-          </Tooltip>
-          <ReloadRecordsButton
-            disabled={busy}
-            onClick={() => {
-              setFailure(null);
-              setRefresh((value) => value + 1);
-            }}
-          />
-        </Space>
-      </div>
       <AuthoringStageFinding basePath={basePath} path={path} stage="proposal" />
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view ? (
@@ -204,20 +215,26 @@ export function WorkflowProposal({
           >
             <div className="proposal-action-controls">
               <h3 id="proposal-approval-title">{t("proposal.approval")}</h3>
-              {proposal?.canInitialize &&
-                !approved &&
-                detail.capabilities.approveProposal && (
-                  <Button
-                    type="primary"
-                    loading={busy}
-                    onClick={() => void run(reviewApproval)}
-                  >
-                    {t("proposal.reviewApproval")}
-                  </Button>
-                )}
+              {!approved && detail.capabilities.approveProposal && (
+                <Button
+                  type="primary"
+                  loading={busy}
+                  disabled={!planReady || !proposal?.canInitialize}
+                  onClick={() => void run(reviewApproval)}
+                >
+                  {t("proposal.reviewApproval")}
+                </Button>
+              )}
               {!proposal && <Link to="#plan">{t("plan.title")}</Link>}
             </div>
             <div className="proposal-action-info">
+              {historical && (
+                <Alert
+                  type="info"
+                  showIcon
+                  title={t("proposal.historicalPlan")}
+                />
+              )}
               {view.confirmation?.invalidatedAt && (
                 <Alert
                   type="warning"
@@ -267,32 +284,40 @@ export function WorkflowProposal({
           >
             <div className="proposal-action-controls">
               <h3>{t("proposal.project")}</h3>
-              {approved && detail.capabilities.initialize && (
-                <Button
-                  type="primary"
-                  disabled={busy || pending}
-                  onClick={() =>
-                    view &&
-                    setReview({
-                      kind: "initialize",
-                      view,
-                      requestId: crypto.randomUUID(),
-                    })
-                  }
-                >
-                  {t(
-                    view?.currentState
-                      ? "proposal.replace"
-                      : "proposal.initialize",
+              {alreadyInitialized ? (
+                <>
+                  <Link to="#package">{t("proposal.continuePackage")}</Link>
+                  {initializationButton && (
+                    <details>
+                      <summary>{t("proposal.restart")}</summary>
+                      {initializationButton}
+                    </details>
                   )}
-                </Button>
+                </>
+              ) : (
+                initializationButton
               )}
-              {view.currentState && (
-                <Link to="#package">{t("package.title")}</Link>
+              {view.currentState && !alreadyInitialized && (
+                <Link to="#package">{t("proposal.inspectPackage")}</Link>
               )}
             </div>
             <div className="proposal-action-info">
-              <p className="muted">{t("proposal.projectHelp")}</p>
+              {canInitialize && view.currentState && !alreadyInitialized ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  title={t("proposal.replaceNeeded")}
+                  description={t("proposal.replaceImpact")}
+                />
+              ) : (
+                <p className="muted">
+                  {t(
+                    alreadyInitialized
+                      ? "proposal.currentProject"
+                      : "proposal.projectHelp",
+                  )}
+                </p>
+              )}
               {view.jobs.length > 0 && (
                 <div role="status" aria-live="polite">
                   <h4>{t("proposal.jobs")}</h4>
@@ -465,6 +490,6 @@ export function WorkflowProposal({
         </ul>
         {failure && <Alert type="error" showIcon title={failure} />}
       </Modal>
-    </WorkflowPanel>
+    </section>
   );
 }

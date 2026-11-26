@@ -265,6 +265,15 @@ for (const theme of ["light", "dark"] as const) {
         `${base}/workflows/${workflow.id}/versions/${version.id}#plan`,
       );
       const planning = author.getByTestId("workflow-plan");
+      await expect(
+        planning.getByRole("region", { name: "Project initialization" }),
+      ).toBeVisible();
+      await expect(
+        planning.getByRole("button", {
+          name: "Initialize project",
+          exact: true,
+        }),
+      ).toBeDisabled();
       const draftsTab = planning.getByRole("tab", {
         name: "Plan drafting jobs and suggestions",
       });
@@ -388,6 +397,9 @@ for (const theme of ["light", "dark"] as const) {
       );
       const ownerPlan = page.getByTestId("workflow-plan");
       await expect(
+        ownerPlan.getByRole("button", { name: "Review proposal approval" }),
+      ).toBeDisabled();
+      await expect(
         ownerPlan.getByRole("tab", {
           name: "Plan drafting jobs and suggestions",
         }),
@@ -429,6 +441,9 @@ for (const theme of ["light", "dark"] as const) {
       await expect(
         ownerPlan.getByText("Plan approved", { exact: true }),
       ).toBeVisible();
+      await expect(
+        ownerPlan.getByRole("button", { name: "Review proposal approval" }),
+      ).toBeEnabled();
       const planScreenshot = info.outputPath(`plan-${theme}.png`);
       await ownerPlan.screenshot({ path: planScreenshot });
       await info.attach(`plan-${theme}`, {
@@ -443,7 +458,7 @@ for (const theme of ["light", "dark"] as const) {
 
       await page.goto(`${base}${root}#proposal`);
       const proposalPanel = page.getByTestId("workflow-proposal");
-      const aboutProposal = proposalPanel.getByRole("button", {
+      const aboutProposal = ownerPlan.getByRole("button", {
         name: "About proposal approval and initialization",
       });
       await aboutProposal.hover();
@@ -499,6 +514,9 @@ for (const theme of ["light", "dark"] as const) {
         authorProposal.getByText("Project initialized", { exact: true }),
       ).toBeVisible();
       const initialized = await call<ProposalView>("GET", `${root}/proposal`);
+      await expect(
+        authorProposal.getByRole("link", { name: "Continue to Package" }),
+      ).toBeVisible();
       const completedJob = initialized.jobs.find(
         (job) => job.status === "succeeded",
       )!;
@@ -522,6 +540,9 @@ for (const theme of ["light", "dark"] as const) {
         references.getByText(initialized.currentState!.hash, { exact: true }),
       ).toBeVisible();
       await references.locator("summary").click();
+      await authorProposal
+        .getByText("Start this project over", { exact: true })
+        .click();
       await authorProposal
         .getByRole("button", { name: "Replace Creator state", exact: true })
         .click();
@@ -554,12 +575,43 @@ for (const theme of ["light", "dark"] as const) {
       expect((await jobRow.boundingBox())!.y).toBeGreaterThan(
         (await controls.boundingBox())!.y,
       );
-      expect(
-        await author.evaluate(
-          () => document.documentElement.scrollWidth <= innerWidth,
-        ),
-      ).toBe(true);
+      await expect
+        .poll(() =>
+          author.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+          ),
+        )
+        .toBe(true);
       await author.setViewportSize(desktop);
+
+      const proposalEndpoint = `**/api/v1${root}/proposal`;
+      await author.route(proposalEndpoint, (route) =>
+        route.fulfill({
+          json: {
+            ...initialized,
+            currentState: {
+              ...initialized.currentState!,
+              proposalConfirmationId: "earlier-confirmation",
+            },
+          },
+        }),
+      );
+      await author.reload();
+      await expect(
+        authorProposal.getByRole("link", { name: "Continue to Package" }),
+      ).toHaveCount(0);
+      await expect(
+        authorProposal.getByText(
+          "The existing project uses an earlier approval.",
+        ),
+      ).toBeVisible();
+      await expect(
+        authorProposal.getByRole("button", {
+          name: "Replace Creator state",
+          exact: true,
+        }),
+      ).toBeEnabled();
+      await author.unroute(proposalEndpoint);
 
       await author.goto(`${base}${root}#package`);
       const packagePanel = author.getByTestId("workflow-package");

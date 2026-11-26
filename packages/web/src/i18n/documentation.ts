@@ -147,7 +147,7 @@ export const documentationEn = {
   "documentation.workflows.plan.drafts":
     "Use the draft ID to match an Agent session to its row. Delete draft is available for an unclaimed, unaccepted draft. A draft with an active claim becomes eligible after the Agent finishes or releases it.",
   "documentation.workflows.plan.approve":
-    "The Workflow owner selects the saved version and uses Review plan approval to approve its exact plan and dossier hashes. Approve the derived proposal separately in Proposal & initialization.",
+    "The Workflow owner selects the saved version and uses Review plan approval to approve its exact plan and dossier hashes. Then review the derived proposal in the Proposal approval row.",
   "documentation.workflows.checks.title": "Workflow approvals and checks",
   "documentation.workflows.checks.approvals":
     "Use a Decision Node for a signed-in person's approval of specific artifact versions. In the plan, a downstream Node can declare approvalRequirements for the required decision, choice, and artifacts. WorkflowRuntime checks the approval before entering the Node and again during inspection and submission. If the file changes or its producer reruns, obtain a fresh approval.",
@@ -156,9 +156,9 @@ export const documentationEn = {
   "documentation.workflows.checks.hook":
     "When called, the generated hook checks the current WorkflowRuntime action. An Agent host needs a supported adapter to register it for a host event.",
   "documentation.workflows.proposal.initialize":
-    "In Plan and proposal → Proposal & initialization, the Workflow owner approves the proposal derived from the current approved Plan. The Engineer then chooses Initialize project and confirms the preview. Follow Initialization jobs, then open Package when the project is ready.",
+    "In Plan and proposal, the Workflow owner approves the proposal derived from the current approved Plan. For a new project, the Engineer chooses Initialize project and confirms the preview. Follow Initialization jobs, then continue to Package.",
   "documentation.workflows.proposal.replace":
-    "Use Replace Creator state after approval of a revised proposal when a Creator state already exists. Confirm the existing state hash. Replacement withdraws the current package and its generation, authoring, evaluation, and review progress.",
+    "Choose Continue to Package when the existing project matches the current approval. If it uses an earlier approval, inspect the previous package before choosing Replace Creator state. Earlier lane reports stay with their original package. The new package requires fresh authoring and review.",
   "documentation.workflows.package":
     "Choose Generate package and confirm the preview for the current proposal and Creator state. Generation jobs shows progress and earlier attempts. Authoring plan lists the lanes, waves, and dependencies.",
   "documentation.workflows.package.files":
@@ -463,7 +463,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.plan.drafts":
     "通过草稿 ID 查找与 Agent 会话对应的记录。未被领取且未被接受的草稿可用“删除草稿”移除。已领取的草稿需等 Agent 结束会话或释放任务后才能删除。",
   "documentation.workflows.plan.approve":
-    "工作流负责人选择已保存的版本，使用“审阅计划批准”批准对应的计划和语义档案哈希。再到“提案与初始化”单独批准由该计划生成的提案。",
+    "工作流负责人选择已保存的版本，使用“审阅计划批准”批准对应的计划和语义档案哈希，再到提案审批行审核由该计划生成的提案。",
   "documentation.workflows.checks.title": "工作流审批与检查",
   "documentation.workflows.checks.approvals":
     "用决策节点让已登录的人员审批指定版本的产物。下游节点可在计划的 approvalRequirements 中声明所需的决策、选项和产物。WorkflowRuntime 在进入节点前以及查看节点或提交结果时校验审批。文件变更或产出节点重新运行后，需重新审批。",
@@ -472,9 +472,9 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.checks.hook":
     "生成的钩子在被调用时检查 WorkflowRuntime 的当前操作。要由 Agent 宿主事件触发钩子，需在宿主中通过受支持的适配器注册。",
   "documentation.workflows.proposal.initialize":
-    "在“提案与初始化”中，由工作流负责人批准根据当前已批准计划生成的提案。工程师选择“初始化项目”并确认预览。在“初始化任务”中查看进度，项目就绪后打开“软件包”。",
+    "在“计划与提案”中，由工作流负责人批准根据当前已批准计划生成的提案。对于新建项目，工程师选择“初始化项目”并确认预览。在“初始化任务”中查看进度，项目就绪后继续到软件包。",
   "documentation.workflows.proposal.replace":
-    "修订后的提案获批且已有 Creator 状态时，使用“替换 Creator 状态”，并确认现有状态的哈希。替换会撤回当前软件包，其生成、创作、评估和审阅进度将失效。",
+    "现有项目与当前批准一致时，选择“继续到软件包”。若它基于先前的批准，请先查看先前的软件包，再选择“替换 Creator 状态”。先前的报告仍保存在原软件包记录中，新软件包需要重新创作和审阅。",
   "documentation.workflows.package":
     "选择“生成软件包”，并确认使用当前提案和 Creator 状态的预览。“生成任务”显示当前进度及以往尝试。“创作计划”列出通道、波次及依赖。",
   "documentation.workflows.package.files":

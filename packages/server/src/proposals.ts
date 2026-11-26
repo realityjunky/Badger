@@ -173,6 +173,7 @@ export async function proposalView(
       ? {
           hash: state.hash,
           proposalHash: state.proposal_hash,
+          proposalConfirmationId: state.proposal_confirmation_id,
           planVersionHash: state.plan_version_hash,
           revision: state.revision,
           initializedAt: toIsoString(state.initialized_at),

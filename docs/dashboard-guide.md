@@ -125,20 +125,20 @@ each current Skill version's full hash.
 
 ## Initialize the approved proposal
 
-In **Plan and proposal → Plans**, the Engineer records implementation choices
+In **Plan and proposal**, the Engineer records implementation choices
 against the approved Dossier. The Workflow owner approves a saved Plan version.
-In **Proposal & initialization**, the kernel shows what that plan would create
+The **Proposal approval** row shows what that plan would create
 from the pinned sources, together with warnings and blockers. After the owner
 approves the proposal, the Engineer chooses **Initialize project**. Initialization records the Creator state
 that binds later generation to that proposal.
 
-Once a Creator state exists, the action is **Replace Creator state**. Use it
-when you intend to initialize again from the current approved proposal, for
-example after approving a revised proposal. The confirmation identifies the
-existing state by its hash. If that state changes before the job runs, Badger
-refuses the replacement. Successful replacement withdraws the current package
-and discards its generation, authoring, evaluation, and package review progress.
-After a successful initialization, continue to **Package**.
+When the project already uses the current approval, choose **Continue to Package**
+to resume work. When an existing project uses an earlier approval, inspect its
+package and lane reports before choosing **Replace Creator state**. Replacement
+requires the existing state hash and starts a new package cycle. Accepted reports
+remain recorded against the old package. The new package requires fresh lane
+reviews. Use **Start this project over** only for an intentional restart of a
+project that already matches its approval.
 
 ## Author the generated package
 

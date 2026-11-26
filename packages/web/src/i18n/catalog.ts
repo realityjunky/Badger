@@ -250,8 +250,18 @@ const en = {
   "proposal.initHelp":
     "Queue initialization of the kernel project using exactly this approved proposal.",
   "proposal.replace": "Replace Creator state",
+  "proposal.currentProject":
+    "This project already uses the approved plan and proposal. Continue to Package to resume work.",
+  "proposal.continuePackage": "Continue to Package",
+  "proposal.restart": "Start this project over",
+  "proposal.inspectPackage": "Inspect previous package",
+  "proposal.replaceNeeded": "The existing project uses an earlier approval.",
+  "proposal.replaceImpact":
+    "Replacing starts a new package cycle. Prior lane reports stay with the previous package. Their acceptances do not carry forward.",
+  "proposal.historicalPlan":
+    "You are viewing an earlier plan version. Select the current plan to act on its proposal.",
   "proposal.replaceHelp":
-    "Replace the Creator state identified below. This discards its authoring, generation, evaluation, and review progress. The job will refuse if the state changes.",
+    "Replace the Creator state identified below and start a new package cycle. Earlier lane reports remain recorded against their package. The new package requires fresh authoring, evaluation, and review. The job stops if the state changes.",
   "proposal.currentState": "Current Creator state hash",
   "proposal.jobs": "Initialization jobs",
   "proposal.status.queued": "Initialization queued",
@@ -2003,8 +2013,18 @@ const zh: Record<MessageId, string> = {
   "proposal.initialize": "初始化项目",
   "proposal.initHelp": "使用此已批准提案创建内核项目初始化任务。",
   "proposal.replace": "替换 Creator 状态",
+  "proposal.currentProject":
+    "项目已使用当前批准的计划和提案。可继续到软件包处理后续工作。",
+  "proposal.continuePackage": "继续到软件包",
+  "proposal.restart": "重新开始此项目",
+  "proposal.inspectPackage": "查看先前的软件包",
+  "proposal.replaceNeeded": "现有项目基于先前的批准记录。",
+  "proposal.replaceImpact":
+    "替换后将开始新一轮软件包工作。原分工报告仍保存在先前的软件包记录中，其接受状态不会转移到新软件包。",
+  "proposal.historicalPlan":
+    "正在查看早期计划版本。请选择当前计划以处理其提案。",
   "proposal.replaceHelp":
-    "替换下方哈希标识的 Creator 状态，将清除其创作、生成、评估与审阅进度。若状态发生变化，任务将拒绝替换。",
+    "替换下方哈希标识的 Creator 状态并开始新一轮软件包工作。原分工报告仍保存在先前的软件包记录中。新软件包需要重新创作、评估和审阅。若状态发生变化，任务将停止。",
   "proposal.currentState": "当前 Creator 状态哈希",
   "proposal.jobs": "初始化任务",
   "proposal.status.queued": "初始化排队中",
