@@ -4,6 +4,10 @@ import {
   AUTHORING_LANE_DEPENDENCIES,
   AUTHORING_LANE_IDS,
   createQuestionnaireHandoff,
+  canonicalHash,
+  emptyWorkingDossier,
+  projectWorkingDossier,
+  type WorkingDossierView,
 } from "@realityjunky/badger";
 import type {
   WorkflowPendingAction,
@@ -767,6 +771,30 @@ export function demoResponse(path: string, query: URLSearchParams): unknown {
   for (const selected of versions) {
     const prefix = `${base}${selected.id}`;
     if (path === prefix) return versionDetail(selected);
+    if (path === `${prefix}/stage-prompts/questionnaire`)
+      return { guidance: [] };
+    if (path === `${prefix}/working-dossier`) {
+      const pins = [
+        { skillId: pin.skillId, name: pin.skillName, hash: pin.hash },
+      ];
+      const content = emptyWorkingDossier();
+      return {
+        available: false,
+        legacy: true,
+        editable: false,
+        revision: 0,
+        pinsHash: canonicalHash(pins),
+        pins,
+        content,
+        reviewedAnswers: [],
+        reviewedRestatements: [],
+        questions: [],
+        projection: projectWorkingDossier(content, pins, []),
+        readiness: [],
+        reviewUrl: `${prefix}#dossier`,
+        prompt: null,
+      } satisfies WorkingDossierView;
+    }
     if (path === `${prefix}/dossier`)
       return {
         versions: [],
@@ -817,7 +845,10 @@ export function demoResponse(path: string, query: URLSearchParams): unknown {
         handoff,
         baselines: [{ id: "demo-round", title: "Release evidence", number: 1 }],
         sinceRound: query.get("sinceRound"),
-        changes: null,
+        changes:
+          query.get("sinceRound") === "demo-round"
+            ? { added: [], changed: [], resolved: [] }
+            : null,
       };
   }
   return Object.hasOwn(records, path) ? records[path] : undefined;

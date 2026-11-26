@@ -241,7 +241,8 @@ tab holds the version picker and the action to start a new version.
   The Activity page shows every recorded action with its actor, time, target,
   channel, and reason, filtered by actor, action, target type, and channel.
   Auditors and Administrators read all of it.
-- Questionnaire has three tabs across the available content width:
+- In Questionnaire, select Workflows or Skills, choose a workflow or Skill,
+  then choose its version. The workflow view has three tabs across the available content width:
   **Rounds and questions**, **Drafting jobs and suggestions** (Engineers, Field
   experts, and Administrators), and **Questionnaire records**. Rounds can be hidden while
   reading or answering a question; they start hidden on narrow screens.
@@ -250,6 +251,9 @@ tab holds the version picker and the action to start a new version.
   preserves the selected record, search, local edits, and each tab's scroll
   position. Existing job, ledger, question, and concern links still work, and
   browser Back restores the tab.
+  In **Questionnaire records**, choose a published round to compare it with
+  current records. Switch between **Five-part ledger** and **Deferred questions
+  and resolutions** below the comparison.
 - Questionnaire's **Drafting jobs and suggestions** tab (#55) is open to
   Engineers, Field experts, and Administrators. Each job card's body is a link:
   right-click it and use the browser's **Copy link address** to share that job,

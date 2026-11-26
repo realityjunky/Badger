@@ -385,9 +385,9 @@ test("a shared drafting job link lets a Field expert edit suggestions before the
         exact: true,
       }),
     ).toHaveAttribute("aria-selected", "true");
-    await expect(respondent.getByTestId("scope-selector")).toContainText(
-      `Structured drafting`,
-    );
+    await expect(
+      respondent.locator(".questionnaire-subject-picker"),
+    ).toContainText(workflow.name);
     await expect(respondent.getByTestId("drafting-job")).toHaveCount(2);
     for (const name of [
       "Request drafting",
@@ -621,6 +621,7 @@ test("Engineers compose every answer type and experts submit structured answers 
     await author
       .getByLabel("Round title", { exact: true })
       .fill("Storage examples");
+    await author.getByRole("dialog").getByRole("checkbox").uncheck();
     await author
       .getByRole("button", { name: "Create round", exact: true })
       .click();

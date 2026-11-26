@@ -24,8 +24,9 @@ export function AppShell() {
     `(max-width: ${layout.railDrawerBreakpoint - 1}px)`,
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [workflowHeadingTarget, setWorkflowHeadingTarget] =
-    useState<HTMLDivElement | null>(null);
+  const [headingTarget, setHeadingTarget] = useState<HTMLDivElement | null>(
+    null,
+  );
   const collapsed = preferences.railCollapsed && !drawerMode;
   const workflowDetail =
     matchPath("/workflows/:workflowId", location.pathname) ??
@@ -70,8 +71,11 @@ export function AppShell() {
         <TopBar
           drawerMode={drawerMode}
           onOpenRail={() => setDrawerOpen(true)}
-          workflowHeadingRef={
-            workflowDetail ? setWorkflowHeadingTarget : undefined
+          headingRef={
+            workflowDetail ||
+            pageTitleKey(location.pathname) === "page.questionnaire.title"
+              ? setHeadingTarget
+              : undefined
           }
         />
         <main id="main-content" className="app-content" tabIndex={-1}>
@@ -85,7 +89,7 @@ export function AppShell() {
               description={t("demo.description")}
             />
           )}
-          <Outlet context={workflowHeadingTarget} />
+          <Outlet context={headingTarget} />
         </main>
       </div>
       <DocumentationDialog />

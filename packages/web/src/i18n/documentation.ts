@@ -191,7 +191,7 @@ export const documentationEn = {
   "documentation.workflows.next":
     "Open the first incomplete stage and resolve the blockers shown there. Earlier versions and sign-offs remain in the workflow's history.",
   "documentation.questionnaire.purpose":
-    "Questionnaire collects the workflow knowledge needed to build a package. Select a workflow and version, then use the full-width Rounds and questions, Drafting jobs and suggestions, or Questionnaire records tab. Suggestion review is available to Engineers, Field experts, and Administrators. In Rounds and questions, hide the rounds list when you need more reading space; Evidence and history opens a drawer for the selected Question or Concern, with an expanded-width option. Switching tabs keeps your selection, search, unfinished edits, and scroll position.",
+    "In Questionnaire, choose Workflows or Skills, then a name and version. Use Rounds and questions to read a question or concern, hide the rounds list for more reading space, or open the Evidence and history drawer. For a workflow, Questionnaire records compares current records with a published round and has tabs for the five-part ledger and deferred questions. Engineers, Field experts, and Administrators can also review drafting jobs and suggestions. Switching tabs keeps your selection, search, unfinished edits, and scroll position.",
   "documentation.questionnaire.roles":
     "Engineers compose and publish Questions and Rounds, resolve Answers, and confirm Facts. They also request drafting jobs and accept or discard the Agent's suggestions. Engineers and Field experts can edit and save shared suggestions before the Engineer decides. Assigned people answer Questions; Field experts acknowledge or dispute Facts restated from their Answers and can raise Concerns. Workflow roles other than Observer can comment. Observers and Auditors read without changing records.",
   "documentation.questionnaire.answer":
@@ -507,7 +507,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.next":
     "打开第一个未完成的阶段，处理其中显示的阻碍。早期版本及确认记录会保留在工作流历史中。",
   "documentation.questionnaire.purpose":
-    "“问卷”收集构建软件包所需的工作流知识。选择工作流与版本，再使用占满内容区宽度的“轮次与问题”“起草任务与建议”或“问卷记录”选项卡。工程师、领域专家和管理员均可审核建议。在“轮次与问题”中，可隐藏轮次列表以扩大阅读空间；“证据与历史”会打开当前问题或关注事项的抽屉，并可展开至全宽。切换选项卡会保留所选记录、搜索、未完成的编辑和滚动位置。",
+    "在“问卷”中，先选择工作流或 Skill 库，再选择名称和版本。在“轮次与问题”中可以阅读问题或关注事项，隐藏轮次列表以扩大阅读空间，或打开“证据与历史”抽屉。工作流的“问卷记录”支持选择已发布轮次与当前记录对比，并可切换查看五部分知识账本和已暂缓的问题及其处理结果。工程师、领域专家和管理员还能审核起草任务与建议。切换选项卡会保留所选记录、搜索、未完成的编辑和滚动位置。",
   "documentation.questionnaire.roles":
     "工程师编写并发布问题和轮次、解决回答并确认事实，也可请求起草任务并接受或丢弃 Agent 的建议。工程师和领域专家可先编辑并保存共享建议，再由工程师作出决定。被分配的人员回答问题；领域专家认可或质疑从其回答重述的事实，也可提出关注事项。除观察者外的工作流角色可评论。观察者和审计员只读，不更改记录。",
   "documentation.questionnaire.answer":

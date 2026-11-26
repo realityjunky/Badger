@@ -285,8 +285,40 @@ test("the ledger shows readiness blockers, confirms a linked inference, and list
     await english(author);
     const ledger = author.getByTestId("questionnaire-ledger");
     await expect(
-      ledger.getByRole("heading", { name: "Questionnaire records" }),
+      author
+        .getByRole("banner")
+        .getByRole("heading", { name: "Questionnaire", exact: true }),
     ).toBeVisible();
+    await expect(author.getByTestId("scope-selector")).toHaveCount(0);
+    const guidance = author.getByRole("button", {
+      name: "Review guidance",
+      exact: true,
+    });
+    await guidance.focus();
+    await expect(
+      author.getByRole("heading", {
+        name: "Publish questions and confirm meaning",
+      }),
+    ).toBeVisible();
+    await guidance.press("Tab");
+    const recordsHelp = ledger.getByRole("button", {
+      name: "About questionnaire records",
+    });
+    await recordsHelp.hover();
+    await expect(
+      author.getByRole("tooltip").filter({
+        hasText: "Review the facts, questions, and sign-offs",
+      }),
+    ).toBeVisible();
+    await ledger
+      .getByRole("tab", { name: "Deferred questions and resolutions" })
+      .click();
+    await expect(
+      ledger.getByRole("tabpanel", {
+        name: "Deferred questions and resolutions",
+      }),
+    ).toBeVisible();
+    await ledger.getByRole("tab", { name: "Five-part ledger" }).click();
     await expect(ledger.getByRole("status")).toHaveText("Blocked");
     await expect(
       ledger.getByText("Remaining questions (1)", { exact: true }),
@@ -412,7 +444,7 @@ test("the ledger shows readiness blockers, confirms a linked inference, and list
     // and the question was resolved; the comparison has its own URL.
     await selectByKeyboard(
       author,
-      ledger.getByLabel("Published round", { exact: true }),
+      ledger.getByLabel("Changes since a round", { exact: true }),
       "1. Contracts",
     );
     await expect(author).toHaveURL(

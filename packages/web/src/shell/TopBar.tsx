@@ -27,15 +27,11 @@ import { scopeSelection, type ScopeSelection } from "./scope.js";
 export interface TopBarProps {
   drawerMode: boolean;
   onOpenRail(): void;
-  workflowHeadingRef?: Ref<HTMLDivElement>;
+  headingRef?: Ref<HTMLDivElement>;
 }
 
 /** The sticky bar shows page context and shared dashboard actions. */
-export function TopBar({
-  drawerMode,
-  onOpenRail,
-  workflowHeadingRef,
-}: TopBarProps) {
+export function TopBar({ drawerMode, onOpenRail, headingRef }: TopBarProps) {
   const demoMode = useDemoMode();
   const { t, format } = useI18n();
   const { preferences, person, update } = usePreferences();
@@ -144,8 +140,15 @@ export function TopBar({
         />
       )}
 
-      {workflowHeadingRef ? (
-        <div className="top-bar-workflow" ref={workflowHeadingRef} />
+      {headingRef ? (
+        <div
+          className={
+            pageTitle === "page.questionnaire.title"
+              ? "top-bar-questionnaire"
+              : "top-bar-workflow"
+          }
+          ref={headingRef}
+        />
       ) : pageTitle === "page.skills.title" ? (
         <h1 className="top-bar-title">{t(pageTitle)}</h1>
       ) : administration ? (

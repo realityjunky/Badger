@@ -186,17 +186,24 @@ test("Questionnaire tabs preserve the selected question, drafts, filters, and sc
       .locator(".questionnaire-tabs")
       .boundingBox())!.width;
     expect(
-      (await author.getByRole("tabpanel").boundingBox())!.width,
+      (await author
+        .getByRole("tabpanel", {
+          name: "Drafting jobs and suggestions",
+          exact: true,
+        })
+        .boundingBox())!.width,
     ).toBeCloseTo(contentWidth, 0);
     await ledgerTab.click();
     await expect(ledgerTab).toHaveAttribute("aria-selected", "true");
     const ledger = author.getByTestId("questionnaire-ledger");
     await expect(ledger.getByRole("status")).toHaveText("Blocked");
     expect(
-      (await author.getByRole("tabpanel").boundingBox())!.width,
+      (await author
+        .getByRole("tabpanel", { name: "Questionnaire records", exact: true })
+        .boundingBox())!.width,
     ).toBeCloseTo(contentWidth, 0);
     const baseline = ledger.getByRole("combobox", {
-      name: "Published round",
+      name: "Changes since a round",
       exact: true,
     });
     await baseline.click();
@@ -1118,7 +1125,18 @@ test("a Skill round publishes directly from Questionnaire and a named Member res
     await author
       .getByRole("combobox", { name: "Questionnaire subject" })
       .click();
-    await author.getByRole("option", { name: /parcel-rules/u }).click();
+    await author
+      .getByRole("menuitemcheckbox", { name: "Skills", exact: true })
+      .click();
+    await author
+      .getByRole("menuitemcheckbox", { name: /parcel-rules/u })
+      .click();
+    await author
+      .getByRole("menuitemcheckbox", {
+        name: preview.hash.slice(0, 12),
+        exact: true,
+      })
+      .click();
     await expect(
       author.getByRole("link", { name: preview.hash }),
     ).toBeVisible();

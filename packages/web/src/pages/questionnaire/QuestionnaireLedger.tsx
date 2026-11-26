@@ -1,4 +1,4 @@
-import { Alert, Button, Collapse, Select, Space, Spin, Tag } from "antd";
+import { Alert, Button, Collapse, Select, Space, Spin, Tabs, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -46,7 +46,6 @@ export function QuestionnaireLedger({
     revisions: LedgerDraft[];
   } | null>(null);
   useEffect(() => {
-    setLedger(null);
     setInspector(null);
     setEditor(null);
   }, [path, sinceRound]);
@@ -192,117 +191,30 @@ export function QuestionnaireLedger({
     "remainingQuestions",
   ] as const;
   return (
-    <section aria-label={t("ledger.records")}>
+    <div>
+      <div className="ledger-filter-bar">
+        <h2 className="pane-title">
+          <label htmlFor="ledger-since-round">{t("ledger.changes")}</label>
+        </h2>
+        <Select
+          id="ledger-since-round"
+          className="questionnaire-version"
+          allowClear
+          value={sinceRound ?? undefined}
+          placeholder={t("ledger.chooseRound")}
+          options={(ledger?.baselines ?? []).map((r) => ({
+            value: r.id,
+            label: `${r.number}. ${r.title}`,
+          }))}
+          onChange={(id) => onSinceRound(id ?? null)}
+        />
+      </div>
       {failure && <Alert type="error" showIcon title={failure} />}
       {ledger === null ? (
         !failure && <Spin aria-label={t("common.loading")} />
       ) : (
         <>
-          {showReadiness && (
-            <section aria-label={t("ledger.readiness")}>
-              <h3>{t("ledger.readiness")}</h3>
-              <p role="status">
-                {t(
-                  ledger.handoff.status === "complete"
-                    ? "ledger.ready"
-                    : "ledger.blocked",
-                )}
-              </p>
-              <Collapse
-                bordered={false}
-                className="ledger-readiness-topics"
-                items={ledger.handoff.readiness.map((readiness) => ({
-                  key: readiness.topic,
-                  label: (
-                    <div className="ledger-topic-heading">
-                      <strong>
-                        {t(`questionnaire.topic.${readiness.topic}`)}
-                      </strong>
-                      <Tag color={readiness.ready ? "success" : "warning"}>
-                        {t(readiness.ready ? "ledger.ready" : "ledger.blocked")}
-                      </Tag>
-                    </div>
-                  ),
-                  children: readiness.ready ? (
-                    <p>{t("ledger.noBlockers")}</p>
-                  ) : (
-                    <ul>
-                      {readiness.blockers.map((blocker, index) => {
-                        const record = blocker.record;
-                        return (
-                          <li
-                            key={`${blocker.code}:${record?.type ?? "private"}:${record?.id ?? index}`}
-                          >
-                            {t(`ledger.blocker.${blocker.code}`)} ·{" "}
-                            {record ? (
-                              <>
-                                {
-                                  ledger.handoff.items.find(
-                                    (item) =>
-                                      item.record.id === record.id &&
-                                      item.record.type === record.type,
-                                  )?.statement
-                                }{" "}
-                                {recordLink(record)}
-                              </>
-                            ) : (
-                              t("ledger.privateQuestion")
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  ),
-                }))}
-              />
-            </section>
-          )}
-          <h3>{t("ledger.parts")}</h3>
-          {view.capabilities.compose && (
-            <Space wrap>
-              <Button onClick={() => edit("inference")}>
-                {t("ledger.addInference")}
-              </Button>
-              <Button onClick={() => edit("assumption")}>
-                {t("ledger.addAssumption")}
-              </Button>
-            </Space>
-          )}
-          <Collapse
-            defaultActiveKey={[...parts]}
-            items={parts.map((part) => ({
-              key: part,
-              label: `${t(`ledger.part.${part}`)} (${ledger.handoff.ledger[part].length})`,
-              children: ledger.handoff.ledger[part].length ? (
-                ledger.handoff.ledger[part].map(itemView)
-              ) : (
-                <p className="muted">{t("ledger.empty")}</p>
-              ),
-            }))}
-          />
-          <h3>{t("ledger.deferred")}</h3>
-          {ledger.handoff.deferredQuestions.length ? (
-            ledger.handoff.deferredQuestions.map(itemView)
-          ) : (
-            <p className="muted">{t("ledger.empty")}</p>
-          )}
-          <h3>{t("ledger.changes")}</h3>
-          <label className="field-label" htmlFor="ledger-since-round">
-            {t("ledger.sinceRound")}
-          </label>
-          <Select
-            id="ledger-since-round"
-            className="questionnaire-version"
-            allowClear
-            value={sinceRound ?? undefined}
-            placeholder={t("ledger.chooseRound")}
-            options={ledger.baselines.map((r) => ({
-              value: r.id,
-              label: `${r.number}. ${r.title}`,
-            }))}
-            onChange={(id) => onSinceRound(id ?? null)}
-          />
-          {ledger.changes && (
+          {ledger.sinceRound === sinceRound && ledger.changes && (
             <>
               <h4>
                 {t("ledger.added")} ({ledger.changes.added.length})
@@ -328,6 +240,118 @@ export function QuestionnaireLedger({
               {ledger.changes.resolved.map((change) => itemView(change.after))}
             </>
           )}
+          <Tabs
+            className="ledger-content-tabs"
+            items={[
+              {
+                key: "parts",
+                label: t("ledger.parts"),
+                children: (
+                  <div className="ledger-parts">
+                    {showReadiness && (
+                      <section aria-label={t("ledger.readiness")}>
+                        <h3>{t("ledger.readiness")}</h3>
+                        <p role="status">
+                          {t(
+                            ledger.handoff.status === "complete"
+                              ? "ledger.ready"
+                              : "ledger.blocked",
+                          )}
+                        </p>
+                        <Collapse
+                          bordered={false}
+                          className="ledger-readiness-topics"
+                          items={ledger.handoff.readiness.map((readiness) => ({
+                            key: readiness.topic,
+                            label: (
+                              <div className="ledger-topic-heading">
+                                <strong>
+                                  {t(`questionnaire.topic.${readiness.topic}`)}
+                                </strong>
+                                <Tag
+                                  color={
+                                    readiness.ready ? "success" : "warning"
+                                  }
+                                >
+                                  {t(
+                                    readiness.ready
+                                      ? "ledger.ready"
+                                      : "ledger.blocked",
+                                  )}
+                                </Tag>
+                              </div>
+                            ),
+                            children: readiness.ready ? (
+                              <p>{t("ledger.noBlockers")}</p>
+                            ) : (
+                              <ul>
+                                {readiness.blockers.map((blocker, index) => {
+                                  const record = blocker.record;
+                                  return (
+                                    <li
+                                      key={`${blocker.code}:${record?.type ?? "private"}:${record?.id ?? index}`}
+                                    >
+                                      {t(`ledger.blocker.${blocker.code}`)} ·{" "}
+                                      {record ? (
+                                        <>
+                                          {
+                                            ledger.handoff.items.find(
+                                              (item) =>
+                                                item.record.id === record.id &&
+                                                item.record.type ===
+                                                  record.type,
+                                            )?.statement
+                                          }{" "}
+                                          {recordLink(record)}
+                                        </>
+                                      ) : (
+                                        t("ledger.privateQuestion")
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            ),
+                          }))}
+                        />
+                      </section>
+                    )}
+                    {view.capabilities.compose && (
+                      <Space wrap>
+                        <Button onClick={() => edit("inference")}>
+                          {t("ledger.addInference")}
+                        </Button>
+                        <Button onClick={() => edit("assumption")}>
+                          {t("ledger.addAssumption")}
+                        </Button>
+                      </Space>
+                    )}
+                    <Collapse
+                      defaultActiveKey={[...parts]}
+                      items={parts.map((part) => ({
+                        key: part,
+                        label: `${t(`ledger.part.${part}`)} (${ledger.handoff.ledger[part].length})`,
+                        children: ledger.handoff.ledger[part].length ? (
+                          ledger.handoff.ledger[part].map(itemView)
+                        ) : (
+                          <p className="muted">{t("ledger.empty")}</p>
+                        ),
+                      }))}
+                    />
+                  </div>
+                ),
+              },
+              {
+                key: "deferred",
+                label: t("ledger.deferred"),
+                children: ledger.handoff.deferredQuestions.length ? (
+                  ledger.handoff.deferredQuestions.map(itemView)
+                ) : (
+                  <p className="muted">{t("ledger.empty")}</p>
+                ),
+              },
+            ]}
+          />
         </>
       )}
       {editor && (
@@ -354,6 +378,6 @@ export function QuestionnaireLedger({
           onEdit={(record) => edit(record.kind, record)}
         />
       )}
-    </section>
+    </div>
   );
 }

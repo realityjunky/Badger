@@ -1,4 +1,11 @@
-import { SearchOutlined } from "@ant-design/icons";
+import {
+  InfoCircleOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  PlusOutlined,
+  SearchOutlined,
+  SettingOutlined,
+} from "@ant-design/icons";
 import {
   Alert,
   Button,
@@ -6,16 +13,22 @@ import {
   Input,
   InputNumber,
   Modal,
-  Select,
+  Tooltip,
   Space,
   Tag,
 } from "antd";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { createPortal } from "react-dom";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useOutletContext,
+  useParams,
+} from "react-router-dom";
 import {
   questionnairePath,
   skillVersionHref,
-  skillVersionCaption,
   questionnaireRequest,
   QuestionnaireError,
   type Question,
@@ -33,12 +46,12 @@ import {
   type WorkingDossierField,
 } from "../api/working-dossier.js";
 import { readBasePath } from "../app/paths.js";
-import { PageHeader } from "../components/PageHeader.js";
+import { GlobalSearch } from "../shell/GlobalSearch.js";
 import { StageReviewGuidance } from "../components/StageReviewGuidance.js";
 import { ReloadRecordsButton } from "../components/ReloadRecordsButton.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
-import { workflowVersionLabel } from "../util/workflowVersion.js";
+import { QuestionnaireSubjectPicker } from "./questionnaire/QuestionnaireSubjectPicker.js";
 import {
   AnswerEditor,
   type AnswerEditorHandle,
@@ -94,7 +107,7 @@ export function QuestionnairePage() {
     () => window.matchMedia("(max-width: 767px)").matches,
   );
   const roundsContentId = useId();
-  const ledgerHeadingId = useId();
+  const headingTarget = useOutletContext<HTMLDivElement | null>();
   const [busy, setBusy] = useState(false);
   const [newRound, setNewRound] = useState(false);
   const [roundTitle, setRoundTitle] = useState("");
@@ -526,43 +539,31 @@ export function QuestionnairePage() {
 
   return (
     <div className="page page-registry" data-testid="page-questionnaire">
-      <PageHeader
-        title={t("page.questionnaire.title")}
-        description={t("page.questionnaire.description")}
-      />
+      {headingTarget &&
+        createPortal(
+          <>
+            <h1 className="top-bar-title">{t("page.questionnaire.title")}</h1>
+            <GlobalSearch
+              scope={{
+                group: skillView?.skill.groupId ?? groupId ?? undefined,
+                workflow: workflowSelection?.workflowId,
+                version: workflowSelection?.versionId,
+              }}
+            />
+          </>,
+          headingTarget,
+        )}
       <div className="questionnaire-toolbar">
-        <Select
-          className="questionnaire-version"
-          aria-label={t("questionnaire.subject")}
-          placeholder={t("questionnaire.chooseVersion")}
-          value={versionQuery || undefined}
-          showSearch={{ optionFilterProp: "label" }}
-          virtual={false}
-          options={[
-            ...(versions.length
-              ? [
-                  {
-                    label: t("questionnaire.workflowVersions"),
-                    options: versions.map((version) => ({
-                      value: subjectQuery(version),
-                      label: `${version.workflowName} · ${workflowVersionLabel(version)}`,
-                    })),
-                  },
-                ]
-              : []),
-            ...(skillVersions.length
-              ? [
-                  {
-                    label: t("questionnaire.skillVersions"),
-                    options: skillVersions.map((version) => ({
-                      value: subjectQuery({ kind: "skill", ...version }),
-                      label: `${version.skillName} · ${skillVersionCaption(version.versionHash, version.label)} · ${version.groupName}${version.retiredAt ? ` · ${t("questionnaire.retiredSkillVersion")}` : ""}`,
-                    })),
-                  },
-                ]
-              : []),
-          ]}
-          onChange={(value) => navigate(`/questionnaire?${value}`)}
+        <QuestionnaireSubjectPicker
+          workflows={versions}
+          skills={skillVersions}
+          selection={selection}
+          onSelect={(subject) => {
+            const parameters = new URLSearchParams(subjectQuery(subject));
+            if ("workflowId" in subject && activeTab !== "questions")
+              parameters.set("panel", activeTab);
+            navigate(`/questionnaire?${parameters}`);
+          }}
         />
         {dossierHref && (
           <Link to={`${dossierHref}#dossier`}>{t("dossier.title")}</Link>
@@ -579,12 +580,21 @@ export function QuestionnairePage() {
         <span className="muted" role="status">
           {t(connected ? "questionnaire.live" : "questionnaire.polling")}
         </span>
-        <ReloadRecordsButton
-          onClick={() => {
-            void reload();
-            void reloadDossier();
-          }}
-        />
+        <Space size={2}>
+          {workflowSelection && workflowView && (
+            <StageReviewGuidance
+              key={path}
+              stage="questionnaire"
+              subject={workflowSelection}
+            />
+          )}
+          <ReloadRecordsButton
+            onClick={() => {
+              void reload();
+              void reloadDossier();
+            }}
+          />
+        </Space>
         {view?.capabilities.raiseConcern && (
           <Button
             onClick={() => {
@@ -605,7 +615,6 @@ export function QuestionnairePage() {
           action={<ReloadRecordsButton onClick={() => void reloadDossier()} />}
         />
       )}
-      {workflowView && <StageReviewGuidance stage="questionnaire" />}
       {skillView && (
         <p className="muted">
           {skillView.groupName} · {skillView.skill.name} ·{" "}
@@ -643,12 +652,9 @@ export function QuestionnairePage() {
           workflowView && path ? (
             <section
               className="questionnaire-ledger"
-              aria-labelledby={ledgerHeadingId}
+              aria-label={t("ledger.records")}
               data-testid="questionnaire-ledger"
             >
-              <h2 className="pane-title" id={ledgerHeadingId}>
-                {t("ledger.records")}
-              </h2>
               {dossierFailure && (
                 <Alert
                   type="error"
@@ -659,24 +665,40 @@ export function QuestionnairePage() {
                   }
                 />
               )}
-              {workingDossier && (
-                <>
-                  <p className="muted">
-                    {t(
-                      workingDossier.legacy
-                        ? "ledger.legacyDescription"
-                        : "ledger.recordsHelp",
+              <Tooltip
+                title={
+                  <>
+                    {t("ledger.recordsHelp")}
+                    {workingDossier?.legacy && (
+                      <p>{t("ledger.legacyDescription")}</p>
                     )}
-                  </p>
-                  {ledgerHistory}
-                </>
-              )}
+                  </>
+                }
+                placement="bottomRight"
+                trigger={["hover", "focus", "click"]}
+              >
+                <Button
+                  type="text"
+                  className="questionnaire-records-help"
+                  aria-label={t("ledger.aboutRecords")}
+                  icon={<InfoCircleOutlined aria-hidden="true" />}
+                />
+              </Tooltip>
+              {workingDossier && ledgerHistory}
             </section>
           ) : null
         }
       >
         <div className="questionnaire-reading-toolbar">
           <Button
+            type="text"
+            icon={
+              roundsCollapsed ? (
+                <MenuUnfoldOutlined aria-hidden="true" />
+              ) : (
+                <MenuFoldOutlined aria-hidden="true" />
+              )
+            }
             aria-expanded={!roundsCollapsed}
             aria-controls={roundsContentId}
             onClick={() => setRoundsCollapsed((value) => !value)}
@@ -708,6 +730,41 @@ export function QuestionnairePage() {
             id={roundsContentId}
             hidden={roundsCollapsed}
           >
+            <header className="questionnaire-pane-header">
+              <h2 className="pane-title">{t("questionnaire.rounds")}</h2>
+              {compose && (
+                <Space wrap>
+                  <Button
+                    size="small"
+                    icon={<PlusOutlined aria-hidden="true" />}
+                    onClick={() => {
+                      setNewRound(true);
+                      setRoundTitle("");
+                      setQuestionSeed(undefined);
+                    }}
+                  >
+                    {t("questionnaire.newRound")}
+                  </Button>
+                  {workflowView && (
+                    <Tooltip
+                      title={t("questionnaire.roundLimit")}
+                      trigger={["hover", "focus"]}
+                    >
+                      <Button
+                        type="text"
+                        aria-label={t("questionnaire.roundLimit")}
+                        icon={<SettingOutlined aria-hidden="true" />}
+                        onClick={() => {
+                          setRoundLimit(workflowView.settings.roundSizeLimit);
+                          setSettingsRevision(workflowView.settings.revision);
+                          setSettings(true);
+                        }}
+                      />
+                    </Tooltip>
+                  )}
+                </Space>
+              )}
+            </header>
             <Input
               allowClear
               prefix={<SearchOutlined aria-hidden="true" />}
@@ -717,31 +774,6 @@ export function QuestionnairePage() {
               aria-label={t("questionnaire.searchQuestions")}
               data-testid="question-search"
             />
-            <h2 className="pane-title">{t("questionnaire.rounds")}</h2>
-            {compose && (
-              <Space wrap>
-                <Button
-                  onClick={() => {
-                    setNewRound(true);
-                    setRoundTitle("");
-                    setQuestionSeed(undefined);
-                  }}
-                >
-                  {t("questionnaire.newRound")}
-                </Button>
-                {workflowView && (
-                  <Button
-                    onClick={() => {
-                      setRoundLimit(workflowView.settings.roundSizeLimit);
-                      setSettingsRevision(workflowView.settings.revision);
-                      setSettings(true);
-                    }}
-                  >
-                    {t("questionnaire.roundLimit")}
-                  </Button>
-                )}
-              </Space>
-            )}
             {!view?.rounds.length && (
               <p className="muted">{t("questionnaire.empty")}</p>
             )}
@@ -754,7 +786,9 @@ export function QuestionnairePage() {
                     onClick={() => setEditing(null)}
                     aria-current={round?.id === r.id ? "true" : undefined}
                   >
-                    {r.number}. {r.title}{" "}
+                    <span>
+                      {r.number}. {r.title}
+                    </span>
                     <Tag>{t(`questionnaire.state.${r.state}`)}</Tag>
                   </Link>
                   <ol className="questionnaire-questions">
@@ -771,16 +805,22 @@ export function QuestionnairePage() {
                         <li key={q.id}>
                           <Link
                             to={`/questionnaire/questions/${encodeURIComponent(q.id)}`}
+                            aria-label={q.text}
+                            aria-describedby={`question-meta-${q.id}`}
                             aria-current={
                               selected?.id === q.id ? "page" : undefined
                             }
                             onClick={() => setEditing(null)}
                           >
-                            {q.text}
+                            <span>{q.text}</span>
+                            <span
+                              id={`question-meta-${q.id}`}
+                              className="questionnaire-question-meta"
+                            >
+                              {t("questionnaire.priority")} {q.priority} ·{" "}
+                              {t(`questionnaire.state.${q.state}`)}
+                            </span>
                           </Link>
-                          <span className="questionnaire-question-meta">
-                            {q.priority} · {t(`questionnaire.state.${q.state}`)}
-                          </span>
                         </li>
                       ))}
                   </ol>
@@ -798,16 +838,21 @@ export function QuestionnairePage() {
                     <li key={concern.id}>
                       <Link
                         to={`/questionnaire/concerns/${encodeURIComponent(concern.id)}`}
+                        aria-label={concern.text}
+                        aria-describedby={`concern-meta-${concern.id}`}
                         aria-current={
                           concern.id === concernId ? "page" : undefined
                         }
                         onClick={() => setEditing(null)}
                       >
-                        {concern.text}
+                        <span>{concern.text}</span>
+                        <span
+                          id={`concern-meta-${concern.id}`}
+                          className="questionnaire-question-meta"
+                        >
+                          {t(`questionnaire.concernState.${concern.state}`)}
+                        </span>
                       </Link>
-                      <span className="questionnaire-question-meta">
-                        {t(`questionnaire.concernState.${concern.state}`)}
-                      </span>
                     </li>
                   ))}
                 </ul>
@@ -863,48 +908,55 @@ export function QuestionnairePage() {
               />
             ) : (
               <>
-                <h2 className="pane-title">
-                  {round?.title ?? t("questionnaire.thread")}
-                </h2>
-                <Space wrap>
-                  {compose && round?.state === "draft" && (
-                    <>
-                      <Button onClick={() => setEditing({ roundId: round.id })}>
-                        {t("questionnaire.newQuestion")}
-                      </Button>
-                      <Button
-                        disabled={
-                          busy ||
-                          !view?.questions.some((q) => q.roundId === round.id)
-                        }
-                        onClick={() =>
-                          void run(async () => {
-                            const result = await questionnaireRequest<{
-                              preview: RoundPreview;
-                            }>(
-                              basePath,
-                              `${path}/rounds/${encodeURIComponent(round.id)}/publish-preview`,
-                            );
-                            setPublication({ round, preview: result.preview });
-                          })
-                        }
-                      >
-                        {t("questionnaire.reviewRound")}
-                      </Button>
-                    </>
-                  )}
-                  {round?.state === "published" &&
-                    view?.questions.some(
-                      (q) => q.roundId === round.id && q.canAnswer,
-                    ) && (
-                      <Button
-                        loading={busy}
-                        onClick={() => void run(submitRound)}
-                      >
-                        {t("questionnaire.submitRound")}
-                      </Button>
+                <header className="questionnaire-pane-header">
+                  <h2 className="pane-title">
+                    {round?.title ?? t("questionnaire.thread")}
+                  </h2>
+                  <Space wrap>
+                    {compose && round?.state === "draft" && (
+                      <>
+                        <Button
+                          onClick={() => setEditing({ roundId: round.id })}
+                        >
+                          {t("questionnaire.newQuestion")}
+                        </Button>
+                        <Button
+                          disabled={
+                            busy ||
+                            !view?.questions.some((q) => q.roundId === round.id)
+                          }
+                          onClick={() =>
+                            void run(async () => {
+                              const result = await questionnaireRequest<{
+                                preview: RoundPreview;
+                              }>(
+                                basePath,
+                                `${path}/rounds/${encodeURIComponent(round.id)}/publish-preview`,
+                              );
+                              setPublication({
+                                round,
+                                preview: result.preview,
+                              });
+                            })
+                          }
+                        >
+                          {t("questionnaire.reviewRound")}
+                        </Button>
+                      </>
                     )}
-                </Space>
+                    {round?.state === "published" &&
+                      view?.questions.some(
+                        (q) => q.roundId === round.id && q.canAnswer,
+                      ) && (
+                        <Button
+                          loading={busy}
+                          onClick={() => void run(submitRound)}
+                        >
+                          {t("questionnaire.submitRound")}
+                        </Button>
+                      )}
+                  </Space>
+                </header>
                 {selected ? (
                   <>
                     <article className="questionnaire-record">

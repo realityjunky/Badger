@@ -78,27 +78,6 @@ export function ScopeSelector({
   }, [basePath, location.pathname, refresh]);
 
   useEffect(() => {
-    const match = /^\/questionnaire\/(questions|concerns)\/([^/]+)$/u.exec(
-      location.pathname,
-    );
-    if (!match) return;
-    const controller = new AbortController();
-    void read<{ workflowId: string; versionId: string }>(
-      basePath,
-      `/questionnaire/${match[1]}/${match[2]}`,
-      controller.signal,
-    ).then((result) => {
-      if (!controller.signal.aborted)
-        setLinked(
-          result.kind === "ok"
-            ? { pathname: location.pathname, ...result.value }
-            : null,
-        );
-    });
-    return () => controller.abort();
-  }, [basePath, location.pathname]);
-
-  useEffect(() => {
     const match = /^\/(skills|runs)\/([^/]+)/u.exec(location.pathname);
     if (!match) return;
     const controller = new AbortController();
