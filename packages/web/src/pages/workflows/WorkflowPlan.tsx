@@ -378,6 +378,7 @@ export function WorkflowPlan({
                 confirmations={view.confirmations}
                 bound={{ name: "plan", hash: selected.hash }}
               />
+              {approved && <Link to="#proposal">{t("proposal.title")}</Link>}
               <PlanContent version={selected} />
             </>
           )}

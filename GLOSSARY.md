@@ -110,7 +110,7 @@ The states of a workflow version's eight authoring stages: sources, source study
 A structured account of the workflow's meaning, including Node responsibilities, inputs, completion evidence, bindings, outputs, decisions, routes, and recovery expectations.
 
 **Working dossier**:
-The editable Semantic dossier of a Workflow version. Source study and the Questionnaire Ledger read the same saved revision. A field can cite pinned lines or a reviewed Answer revision. Each occurrence of a Skill has its own identity and trigger, and a handoff connects a producer occurrence to a consumer occurrence.
+The editable Semantic dossier of a Workflow version. Source study and the Dossier panel read the same saved revision. A field can cite pinned lines or a reviewed Answer revision. Each occurrence of a Skill has its own identity and trigger, and a handoff connects a producer occurrence to a consumer occurrence.
 
 **Dossier version**:
 An immutable Semantic dossier and the Ledger records it relies on. Approving a working dossier captures its exact revision and the current sign-offs. Earlier composed Dossier versions retain their original identities and approval history. Changes to the approved basis supersede approval and preserve the original snapshot.

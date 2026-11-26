@@ -6,6 +6,7 @@ import {
   workingDossierPath,
 } from "../../api/working-dossier.js";
 import { useI18n } from "../../i18n/I18nContext.js";
+import { SnapshotJson } from "../../components/SnapshotJson.js";
 import { WorkingDossierStudy } from "../working-dossier/WorkingDossierStudy.js";
 
 /** Show the immutable document and the record revisions the owner is approving. */
@@ -61,7 +62,7 @@ export function DossierContent({
             <p className="muted">
               {format("workingDossier.revision", { revision })}
             </p>
-            <pre className="dossier-json">{canonicalJson}</pre>
+            <SnapshotJson canonical={canonicalJson} />
           </details>
         )}
       </div>
@@ -152,7 +153,7 @@ export function DossierContent({
       {canonicalJson !== null && (
         <details>
           <summary>{t("dossier.canonical")}</summary>
-          <pre className="dossier-json">{canonicalJson}</pre>
+          <SnapshotJson canonical={canonicalJson} />
         </details>
       )}
     </div>

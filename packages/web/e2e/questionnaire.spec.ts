@@ -169,7 +169,7 @@ test("Questionnaire tabs preserve the selected question, drafts, filters, and sc
       exact: true,
     });
     const ledgerTab = tabs.getByRole("tab", {
-      name: "Ledger and readiness",
+      name: "Questionnaire records",
       exact: true,
     });
     await author.getByTestId("question-search").fill("sample");

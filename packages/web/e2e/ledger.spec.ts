@@ -285,7 +285,7 @@ test("the ledger shows readiness blockers, confirms a linked inference, and list
     await english(author);
     const ledger = author.getByTestId("questionnaire-ledger");
     await expect(
-      ledger.getByRole("heading", { name: "Ledger and readiness" }),
+      ledger.getByRole("heading", { name: "Questionnaire records" }),
     ).toBeVisible();
     await expect(ledger.getByRole("status")).toHaveText("Blocked");
     await expect(
@@ -416,7 +416,7 @@ test("the ledger shows readiness blockers, confirms a linked inference, and list
       "1. Contracts",
     );
     await expect(author).toHaveURL(
-      new RegExp(`panel=ledger&sinceRound=${round.id}`, "u"),
+      new RegExp(`panel=records&sinceRound=${round.id}`, "u"),
     );
     await expect(
       ledger.getByRole("heading", { name: "Added (2)", exact: true }),

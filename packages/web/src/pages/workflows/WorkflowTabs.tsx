@@ -15,9 +15,10 @@ export function WorkflowTabs({
   const location = useLocation();
   const navigate = useNavigate();
   const requestedTab = selectedWorkflowTab(location);
+  const parentTab = requestedTab === "proposal" ? "plan" : requestedTab;
   const panels = [...items, linkedPanel];
   const activeTab =
-    panels.find((item) => item.key === requestedTab)?.key ?? items[0]?.key;
+    panels.find((item) => item.key === parentTab)?.key ?? items[0]?.key;
   const [topOffset, setTopOffset] = useState<number>();
   const scrollPositions = useRef(new Map<string, number>());
   const previousTab = useRef(activeTab);

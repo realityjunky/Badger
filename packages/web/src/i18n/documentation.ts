@@ -94,7 +94,7 @@ export const documentationEn = {
   "documentation.workflows.study":
     "After the source check passes, the Engineer opens Source study and uses Copy prompt with the connected Badger MCP. The Agent saves a working dossier with the Skills’ recorded uses, handoffs, routes, material findings, and exact evidence.",
   "documentation.workflows.study.suggestions":
-    "Use Executable disclosures to record what the workflow's scripts do and any approval those actions require. In Questionnaire → Ledger and readiness, edit fields, ask Questions about unresolved decisions, and apply reviewed Answers. Expand Workflow details below the diagram for fields that apply to the whole workflow.",
+    "Use Executable disclosures to record what the workflow's scripts do and any approval those actions require. In Workflows → Dossier → Readiness by topic, edit fields, ask Questions about unresolved decisions, and apply reviewed Answers. Expand Workflow details below the diagram for fields that apply to the whole workflow.",
   "documentation.workflows.study.complete":
     "The Workflow owner approves the working dossier after Sources are confirmed and readiness checks pass. In earlier workflow versions that use source-derived fact records, the Engineer reviews each pin and chooses Mark version studied.",
   "documentation.workflows.study.diagram":
@@ -137,13 +137,13 @@ export const documentationEn = {
   "documentation.workflows.questionnaire":
     "The Engineer drafts and publishes rounds for assigned people to answer. Review their answers and resolve each question. The person who answered can acknowledge or dispute a Fact that restates their answer.",
   "documentation.workflows.questionnaire.readiness":
-    "In Ledger and readiness, open Workflow structure to edit occurrences, handoffs, and routes. Readiness by topic shows what the Dossier still needs. Questionnaire records contains the ledger and round history. Earlier versions use the five-part ledger to record inferences and assumptions.",
+    "In Dossier → Readiness by topic, open Workflow structure to edit occurrences, handoffs, and routes. Readiness by topic shows what the Dossier still needs. Questionnaire records contains the ledger and round history. Earlier versions use the five-part ledger to record inferences and assumptions.",
   "documentation.workflows.dossier":
-    "The Ledger's save actions and the Engineer MCP update the same working dossier. Open Saved workflow structure in Dossier to inspect the draft. Approval records the exact revision in Canonical JSON and record snapshot. Earlier versions compose the Semantic dossier from the Ledger.",
+    "Dossier edits and the Engineer MCP update the same working revision. Select the working copy or a saved version to inspect its fields, diagram, revision details, and JSON. Saved versions include the canonical snapshot and the record revisions it binds. Earlier versions compose the Semantic dossier from the Ledger.",
   "documentation.workflows.dossier.approve":
     "The Workflow owner approves the exact dossier version used to draft or compose the plan.",
   "documentation.workflows.plan":
-    "In Plans, choose Request plan draft, then use Copy Agent prompt on the queued draft. When the Agent finishes, choose Review plan suggestion. Resolve the plan findings and confirm Accept as a plan version. Use Edit plan to compose a version directly.",
+    "In Plan and proposal → Plans, choose Request plan draft, then use Copy Agent prompt on the queued draft. When the Agent finishes, choose Review plan suggestion. Resolve the plan findings and confirm Accept as a plan version. Use Edit plan to compose a version directly.",
   "documentation.workflows.plan.drafts":
     "Use the draft ID to match an Agent session to its row. Delete draft is available for an unclaimed, unaccepted draft. A draft with an active claim becomes eligible after the Agent finishes or releases it.",
   "documentation.workflows.plan.approve":
@@ -156,7 +156,7 @@ export const documentationEn = {
   "documentation.workflows.checks.hook":
     "When called, the generated hook checks the current WorkflowRuntime action. An Agent host needs a supported adapter to register it for a host event.",
   "documentation.workflows.proposal.initialize":
-    "In Proposal & initialization, the Workflow owner approves the proposal derived from the current approved Plan. The Engineer then chooses Initialize project and confirms the preview. Follow Initialization jobs, then open Package when the project is ready.",
+    "In Plan and proposal → Proposal & initialization, the Workflow owner approves the proposal derived from the current approved Plan. The Engineer then chooses Initialize project and confirms the preview. Follow Initialization jobs, then open Package when the project is ready.",
   "documentation.workflows.proposal.replace":
     "Use Replace Creator state after approval of a revised proposal when a Creator state already exists. Confirm the existing state hash. Replacement withdraws the current package and its generation, authoring, evaluation, and review progress.",
   "documentation.workflows.package":
@@ -191,7 +191,7 @@ export const documentationEn = {
   "documentation.workflows.next":
     "Open the first incomplete stage and resolve the blockers shown there. Earlier versions and sign-offs remain in the workflow's history.",
   "documentation.questionnaire.purpose":
-    "Questionnaire collects the workflow knowledge needed to build a package. Select a workflow and version, then use the full-width Rounds and questions, Drafting jobs and suggestions, or Ledger and readiness tab. Suggestion review is available to Engineers, Field experts, and Administrators. In Rounds and questions, hide the rounds list when you need more reading space; Evidence and history opens a drawer for the selected Question or Concern, with an expanded-width option. Switching tabs keeps your selection, search, unfinished edits, and scroll position.",
+    "Questionnaire collects the workflow knowledge needed to build a package. Select a workflow and version, then use the full-width Rounds and questions, Drafting jobs and suggestions, or Questionnaire records tab. Suggestion review is available to Engineers, Field experts, and Administrators. In Rounds and questions, hide the rounds list when you need more reading space; Evidence and history opens a drawer for the selected Question or Concern, with an expanded-width option. Switching tabs keeps your selection, search, unfinished edits, and scroll position.",
   "documentation.questionnaire.roles":
     "Engineers compose and publish Questions and Rounds, resolve Answers, and confirm Facts. They also request drafting jobs and accept or discard the Agent's suggestions. Engineers and Field experts can edit and save shared suggestions before the Engineer decides. Assigned people answer Questions; Field experts acknowledge or dispute Facts restated from their Answers and can raise Concerns. Workflow roles other than Observer can comment. Observers and Auditors read without changing records.",
   "documentation.questionnaire.answer":
@@ -207,7 +207,7 @@ export const documentationEn = {
   "documentation.questionnaire.drafting.review":
     "Review suggestions: claimed jobs open a read-only view of the latest saved suggestions, updating as the owner saves. Save and Finish editing stay disabled; viewing does not claim, renew or release the job. Close and reopen after the claim ends to edit. Opening an unclaimed job reserves editing for that Engineer or Field expert. Save retains the claim; Finish editing saves and releases it. Closing or 30 idle minutes releases only saved changes. Claimed cards identify the active Agent or dashboard reviewer and refresh automatically. After a session ends, reopen or claim again to load the latest saved version; old copies cannot overwrite a later session. Source studies have Statements and Script effect review tabs, each with numbered item tabs. Edit statements, effect labels, rationale, conditional behavior, and uncertainty; paths and citations remain fixed. Changed saves preserve the original submission and advance the revision; identical retries do not add revisions. Preserve expired unsaved text for reference and reconcile with the latest version. Saving does not accept records or confirm script declarations. The Engineer separately uses Review decisions for the latest saved result; another save invalidates an older preview. Accepted questions still need round publication, restatements need the answering person's acknowledgement, and the original uploader can confirm an optional declaration in Skills. Discarding requires a reason and confirmation.",
   "documentation.questionnaire.next":
-    "Clear the open Questions, acknowledgement requests, and readiness blockers. The Engineer can then compose the dossier in Workflows using the current Ledger evidence.",
+    "Resolve open Questions and acknowledge reviewed Answers. Open the linked dossier field to apply the reviewed revision and check its readiness.",
   "documentation.skills.purpose":
     "Skills is a Group's shared source library. An entry can hold several immutable Skill versions. A workflow uses a source only after an Engineer pins a specific version to its Workflow version.",
   "documentation.skills.roles":
@@ -411,7 +411,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.study":
     "来源检查通过后，工程师打开“来源研读”，选择“复制提示词”，并交给连接了 Badger MCP 的 Agent。Agent 保存工作档案，记录 Skill 的各项用法、交接、路线、重要发现和确切的证据。",
   "documentation.workflows.study.suggestions":
-    "在“可执行操作披露”中记录工作流实际使用的脚本行为及所需批准。在“问卷 → 台账与就绪状态”中编辑字段、针对未决事项提问并应用已审阅的回答。展开图下方的“工作流详情”，可查看适用于整个工作流的字段。",
+    "在“可执行操作披露”中记录工作流实际使用的脚本行为及所需批准。在“工作流 → 语义档案 → 各主题就绪状态”中编辑字段、针对未决事项提问并应用已审阅的回答。展开图下方的“工作流详情”，可查看适用于整个工作流的字段。",
   "documentation.workflows.study.complete":
     "确认来源并通过就绪检查后，由工作流负责人批准工作档案。使用来源事实记录的早期工作流版本中，工程师逐一审阅固定版本并选择“标记版本为已研读”。",
   "documentation.workflows.study.diagram":
@@ -453,13 +453,13 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.questionnaire":
     "工程师起草并发布轮次，由指定人员作答。审阅回答并解决各个问题。作答人可认可或质疑根据其回答重述的事实。",
   "documentation.workflows.questionnaire.readiness":
-    "在“知识账本与就绪状态”中，展开“工作流结构”可编辑调用、交接和路线。“各主题就绪状态”列出档案仍需处理的事项。“问卷记录”包含知识账本和轮次历史。早期版本使用五部分知识账本记录推断和假设。",
+    "在“语义档案 → 各主题就绪状态”中，展开“工作流结构”可编辑调用、交接和路线。“各主题就绪状态”列出档案仍需处理的事项。“问卷记录”包含知识账本和轮次历史。早期版本使用五部分知识账本记录推断和假设。",
   "documentation.workflows.dossier":
-    "知识账本中的保存操作和工程师 MCP 更新同一份工作档案。在“档案”中展开“已保存的工作流结构”查看草稿。批准后可在“规范 JSON 与记录快照”中查看该修订。早期版本从知识账本编写语义档案。",
+    "档案编辑器和工程师 MCP 更新同一份工作档案。选择工作修订或已保存的版本，即可查看字段、工作流图、修订详情和 JSON。已保存的版本包含规范快照及绑定的记录修订。早期版本从知识账本编写语义档案。",
   "documentation.workflows.dossier.approve":
     "工作流负责人批准用于起草或编写计划的确切档案版本。",
   "documentation.workflows.plan":
-    "在“计划”中选择“请求起草计划”，然后在排队中的草稿上选择“复制 Agent 提示词”。Agent 结束起草会话后，选择“审阅计划建议”。处理计划检查发现的问题，再确认“接受为计划版本”。也可用“编辑计划”直接编写新版本。",
+    "在“计划与提案 → 计划”中选择“请求起草计划”，然后在排队中的草稿上选择“复制 Agent 提示词”。Agent 结束起草会话后，选择“审阅计划建议”。处理计划检查发现的问题，再确认“接受为计划版本”。也可用“编辑计划”直接编写新版本。",
   "documentation.workflows.plan.drafts":
     "通过草稿 ID 查找与 Agent 会话对应的记录。未被领取且未被接受的草稿可用“删除草稿”移除。已领取的草稿需等 Agent 结束会话或释放任务后才能删除。",
   "documentation.workflows.plan.approve":
@@ -507,7 +507,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.next":
     "打开第一个未完成的阶段，处理其中显示的阻碍。早期版本及确认记录会保留在工作流历史中。",
   "documentation.questionnaire.purpose":
-    "“问卷”收集构建软件包所需的工作流知识。选择工作流与版本，再使用占满内容区宽度的“轮次与问题”“起草任务与建议”或“台账与就绪状态”选项卡。工程师、领域专家和管理员均可审核建议。在“轮次与问题”中，可隐藏轮次列表以扩大阅读空间；“证据与历史”会打开当前问题或关注事项的抽屉，并可展开至全宽。切换选项卡会保留所选记录、搜索、未完成的编辑和滚动位置。",
+    "“问卷”收集构建软件包所需的工作流知识。选择工作流与版本，再使用占满内容区宽度的“轮次与问题”“起草任务与建议”或“问卷记录”选项卡。工程师、领域专家和管理员均可审核建议。在“轮次与问题”中，可隐藏轮次列表以扩大阅读空间；“证据与历史”会打开当前问题或关注事项的抽屉，并可展开至全宽。切换选项卡会保留所选记录、搜索、未完成的编辑和滚动位置。",
   "documentation.questionnaire.roles":
     "工程师编写并发布问题和轮次、解决回答并确认事实，也可请求起草任务并接受或丢弃 Agent 的建议。工程师和领域专家可先编辑并保存共享建议，再由工程师作出决定。被分配的人员回答问题；领域专家认可或质疑从其回答重述的事实，也可提出关注事项。除观察者外的工作流角色可评论。观察者和审计员只读，不更改记录。",
   "documentation.questionnaire.answer":
@@ -523,7 +523,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.questionnaire.drafting.review":
     "审核建议：已领取的任务会以只读方式显示最新保存的建议，并随当前编辑者的保存自动更新。“保存”和“完成编辑”保持禁用，查看不会领取、续期或释放任务。领取结束后，请关闭并重新打开以开始编辑。打开未领取的任务后，由该工程师或领域专家独占编辑。保存后继续独占；“完成编辑”会保存并释放任务。关闭编辑器或闲置 30 分钟时，仅保留已保存的修改并释放任务。已领取的卡片会显示当前 Agent 或仪表盘审核人，并自动刷新。会话结束后，必须重新打开或重新领取，从最新保存的版本继续；旧副本不能覆盖后续会话。来源研读分为“陈述”和“脚本副作用审核”两个主选项卡，各自包含编号子选项卡。可编辑陈述、副作用标签、理由、条件行为和不确定性；路径与引用保持固定。保存修改会保留原始提交并推进修订号；相同内容的重试不增加修订号。过期的未保存文字仍可参考，请与最新版本协调修改。保存不等于接受记录或确认脚本声明。工程师另行通过“审核决定”处理最新保存结果；后续保存会使旧预览失效。接受的问题仍需发布轮次，重述事实仍需作答者认可，原上传人可在 Skill 库中确认可选声明。丢弃必须说明原因并确认。",
   "documentation.questionnaire.next":
-    "处理未解决问题、待认可请求及就绪阻碍后，工程师可返回“工作流”，根据当前台账证据编写语义档案。",
+    "解决待处理问题并认可已审阅的回答后，打开关联的档案字段，应用已审阅的修订并检查就绪状态。",
   "documentation.skills.purpose":
     "“Skills”是团队共享的来源库。一个条目可以包含多个不可变 Skill 版本。只有工程师将某个确切版本固定到工作流版本后，该工作流才会使用它。",
   "documentation.skills.roles":

@@ -2550,7 +2550,27 @@ button.rail-link {
 .dossier-review-values > div {
   min-width: 0;
 }
+.snapshot-format {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin-block: 8px;
+}
+.project-initialization {
+  border-top: 1px solid var(--badger-color-border);
+  margin-block-start: 24px;
+  padding-block-start: 12px;
+}
+.dossier-views,
+.planning-tabs {
+  min-width: 0;
+}
 .dossier-json {
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-panel);
+  padding: 16px;
+  line-height: 1.55;
+  tab-size: 2;
   max-height: 360px;
   overflow: auto;
   white-space: pre-wrap;

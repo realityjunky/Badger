@@ -1,3 +1,4 @@
+import { SnapshotJson } from "../../components/SnapshotJson.js";
 import type { PlanVersion } from "../../api/plans.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
@@ -38,7 +39,7 @@ export function PlanContent({
       {version.canonicalJson !== null && (
         <details>
           <summary>{t("plan.canonical")}</summary>
-          <pre className="dossier-json">{version.canonicalJson}</pre>
+          <SnapshotJson canonical={version.canonicalJson} />
         </details>
       )}
     </div>

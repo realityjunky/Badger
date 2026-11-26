@@ -134,19 +134,19 @@ tab holds the version picker and the action to start a new version.
 - One per-person event stream refreshes inboxes and open questionnaire and
   workflow records. Reconnects reload a current snapshot; polling every ten
   seconds and focus refresh recover when streaming is unavailable.
-- Questionnaire's **Ledger and readiness** view shows all five ledger parts,
-  expandable per-topic blockers, linked record histories, deferred resolutions,
+- Questionnaire's **Questionnaire records** view shows all five ledger parts,
+  legacy per-topic blockers, linked record histories, deferred resolutions,
   and changes since a chosen published round. Engineers create, revise, link,
   and retire inference and assumption drafts; Retire asks first, naming the
   draft's kind and saying that a retired draft cannot be revised and leaves
   the ledger and readiness (#76). The service's kernel handoff supplies all
   membership and readiness decisions. The view and comparison round have URLs
   and retain the deployment base path.
-- Workflow versions include a **Dossier** panel (#50). Engineers
+- Workflow versions include a **Dossier** panel (#50). For working dossiers, the version selector switches between editable fields with readiness and immutable snapshots. Workflow details, the diagram, revision details, and formatted JSON have separate tabs. On earlier workflows, Engineers
   author topic summaries, supporting fact links, and Node responsibilities,
   review kernel findings and the canonical snapshot, then compose an immutable
   version. Workflow owners review and approve its exact hash in a separate
-  dialog. The panel opens on the current version, which may be an earlier one
+  dialog. For earlier workflows the panel opens on the current composed version, which may be an earlier one
   the Engineer composed again. Version selection has a URL; superseded
   artifacts remain readable, and the inbox links directly to pending or
   superseded dossier approvals.
@@ -166,7 +166,7 @@ tab holds the version picker and the action to start a new version.
   earlier version's content selects it again. Historical versions have URLs;
   stale edits and approvals conflict, and a superseded dossier invalidates
   dependent approvals and notifies both roles.
-- Workflow versions include **Proposal & initialization** (#59). Once the
+- Workflow versions include **Plan and proposal → Proposal & initialization** (#59). Once the
   current plan is approved, the pane shows the kernel's proposal: its hash,
   the plan version hash, the pinned sources, any blockers, and the current
   Creator state's hash when the project has one. Workflow owners approve the
@@ -243,7 +243,7 @@ tab holds the version picker and the action to start a new version.
   Auditors and Administrators read all of it.
 - Questionnaire has three tabs across the available content width:
   **Rounds and questions**, **Drafting jobs and suggestions** (Engineers, Field
-  experts, and Administrators), and **Ledger and readiness**. Rounds can be hidden while
+  experts, and Administrators), and **Questionnaire records**. Rounds can be hidden while
   reading or answering a question; they start hidden on narrow screens.
   **Evidence and history** opens a drawer for the selected Question or Concern,
   with Evidence/History tabs and an expanded-width option. Switching main tabs

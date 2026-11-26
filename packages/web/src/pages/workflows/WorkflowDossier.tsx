@@ -1,4 +1,4 @@
-import { Alert, Button, Collapse, Modal, Select, Space, Spin, Tag } from "antd";
+import { Alert, Button, Modal, Select, Space, Spin, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { DossierView } from "../../api/dossier.js";
@@ -6,7 +6,10 @@ import {
   QuestionnaireError,
   questionnaireRequest,
 } from "../../api/questionnaire.js";
-import { workingDossierPath } from "../../api/working-dossier.js";
+import {
+  approvedDossierFields,
+  workingDossierPath,
+} from "../../api/working-dossier.js";
 import type {
   ApprovedWorkingDossier,
   WorkingDossierView,
@@ -25,12 +28,10 @@ import { WorkingDossierApproval } from "./WorkingDossierApproval.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
 import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
 import { selectedWorkflowTab } from "./WorkflowTabs.js";
-import {
-  DossierReadiness,
-  RemovedDossierFields,
-} from "../working-dossier/DossierReadiness.js";
+import { DossierViews, SnapshotTopics } from "./DossierViews.js";
+import { SnapshotJson } from "../../components/SnapshotJson.js";
+import { WorkingDossierLedger } from "../working-dossier/WorkingDossierLedger.js";
 import { useWorkingDossier } from "../working-dossier/useWorkingDossier.js";
-import { WorkingDossierStudy } from "../working-dossier/WorkingDossierStudy.js";
 
 export function WorkflowDossier({
   basePath,
@@ -41,7 +42,7 @@ export function WorkflowDossier({
   detail: WorkflowVersionDetail;
   onChanged(): void;
 }) {
-  const { t, format } = useI18n();
+  const { t, format, locale } = useI18n();
   const inbox = useInbox();
   const location = useLocation();
   const navigate = useNavigate();
@@ -64,14 +65,40 @@ export function WorkflowDossier({
   const active = selectedWorkflowTab(location) === "dossier";
   const {
     dossier,
+    accept,
     failure: dossierFailure,
     reload,
   } = useWorkingDossier(basePath, dossierPath, detail.version.id, active);
   const working = dossier && !dossier.legacy;
-  const selectedId = new URLSearchParams(location.search).get("dossierVersion");
-  const selected =
-    view?.versions.find((v) => v.id === selectedId) ??
-    view?.versions.find((v) => v.id === view.headVersionId);
+  const query = new URLSearchParams(location.search);
+  const selectedId = query.get("dossierVersion");
+  const selected = view?.versions.find(
+    (v) => v.id === (selectedId ?? (working ? null : view.headVersionId)),
+  );
+  const draft = working && !selectedId ? dossier : undefined;
+  const snapshot = selected?.snapshot;
+  const captured = snapshot?.dossier.workingDossier;
+  const basis = draft ?? captured;
+  const fields =
+    draft?.projection.fields ??
+    (captured ? approvedDossierFields(captured) : []);
+  const context = {
+    basePath,
+    path: dossierPath,
+    revision: basis?.revision ?? 0,
+    pins: basis?.pins ?? [],
+  };
+  const questionnaireQuery = new URLSearchParams({
+    workflow: detail.workflow.id,
+    version: detail.version.id,
+  });
+  function select(key: "dossierVersion" | "dossierTab", value: string) {
+    const params = new URLSearchParams(location.search);
+    if (key === "dossierVersion") params.delete("dossierField");
+    if (value === "working") params.delete(key);
+    else params.set(key, value);
+    navigate({ search: params.toString(), hash: "#dossier" });
+  }
   const superseded =
     selected !== undefined && selected.id !== view?.currentVersionId;
   const approved =
@@ -111,9 +138,8 @@ export function WorkflowDossier({
     return () => controller.abort();
   }, [active, basePath, path, detail.version.revision, dossier, refresh]);
   useEffect(() => {
-    if (location.hash === "#dossier" && view)
-      section.current?.scrollIntoView({ block: "start" });
-  }, [location.key, Boolean(view)]);
+    if (active && view) section.current?.scrollIntoView({ block: "start" });
+  }, [active, Boolean(view)]);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -260,145 +286,63 @@ export function WorkflowDossier({
       )}
       {view && (
         <>
-          <p>
-            <Link
-              to={`/questionnaire?workflow=${encodeURIComponent(detail.workflow.id)}&version=${encodeURIComponent(detail.version.id)}&panel=ledger`}
-            >
-              {t(
-                working && dossier.editable && dossier.available
-                  ? "workingDossier.edit"
-                  : "ledger.title",
-              )}
-            </Link>
-          </p>
-          {working && (
-            <section
-              className="working-dossier-approval"
-              aria-label={t("workingDossier.title")}
-            >
-              <div className="working-dossier-toolbar">
-                <h3>
-                  {format("workingDossier.revision", {
-                    revision: dossier.revision,
-                  })}
-                </h3>
+          {dossier && (
+            <>
+              <div className="dossier-version-heading working-dossier-toolbar">
                 <Space wrap>
-                  {approvedRevision && (
+                  <Select
+                    aria-label={t("dossier.version")}
+                    value={draft ? "working" : selected?.id}
+                    placeholder={t("dossier.version")}
+                    options={[
+                      ...(working
+                        ? [
+                            {
+                              value: "working",
+                              label: format("workingDossier.revision", {
+                                revision: dossier.revision,
+                              }),
+                            },
+                          ]
+                        : []),
+                      ...view.versions.map((v) => ({
+                        value: v.id,
+                        label: format("dossier.versionNumber", {
+                          number: v.number,
+                        }),
+                      })),
+                    ]}
+                    onChange={(value) => select("dossierVersion", value)}
+                  />
+                  {draft && approvedRevision && (
                     <Tag color="success">{t("dossier.approved")}</Tag>
                   )}
-                  {!approvedRevision &&
-                    detail.capabilities.approveDossier &&
-                    dossier.available && (
-                      <Button
-                        type="primary"
-                        loading={busy}
-                        onClick={() => void run(preview)}
-                      >
-                        {t("dossier.reviewApproval")}
-                      </Button>
-                    )}
-                </Space>
-              </div>
-              {!dossier.available && (
-                <Alert
-                  type="info"
-                  showIcon
-                  title={t("workingDossier.waitForCheck")}
-                />
-              )}
-              {dossier.revision > 0 && !approvedRevision && (
-                <Collapse
-                  items={[
-                    {
-                      key: "saved-structure",
-                      label: t("workingDossier.savedStructure"),
-                      children: (
-                        <WorkingDossierStudy
-                          dossier={{
-                            content: dossier.content,
-                            pins: dossier.pins,
-                            projection: dossier.projection,
-                            revision: dossier.revision,
-                          }}
-                          context={{
-                            basePath,
-                            path: dossierPath,
-                            revision: dossier.revision,
-                            pins: dossier.pins,
-                          }}
-                        />
-                      ),
-                    },
-                  ]}
-                />
-              )}
-              <DossierReadiness dossier={dossier} />
-              <RemovedDossierFields dossier={dossier} />
-            </section>
-          )}
-          {dossier?.legacy && view.handoff.status !== "complete" && (
-            <Alert
-              className="dossier-readiness"
-              type="warning"
-              showIcon
-              title={t("ledger.blocked")}
-              description={
-                <ul>
-                  {view.handoff.readiness
-                    .filter((r) => !r.ready)
-                    .map((r) => (
-                      <li key={r.topic}>
-                        {t(`questionnaire.topic.${r.topic}`)}:{" "}
-                        {r.blockers
-                          .map((b) => t(`ledger.blocker.${b.code}`))
-                          .join(" · ")}
-                      </li>
-                    ))}
-                </ul>
-              }
-            />
-          )}
-          {!selected ? (
-            dossier && (
-              <p className="empty-state">
-                {t(working ? "workingDossier.noApprovals" : "dossier.empty")}
-              </p>
-            )
-          ) : (
-            <>
-              <Space wrap className="dossier-version-heading">
-                <Select
-                  aria-label={t("dossier.version")}
-                  value={selected.id}
-                  options={view.versions.map((v) => ({
-                    value: v.id,
-                    label: format("dossier.versionNumber", {
-                      number: v.number,
-                    }),
-                  }))}
-                  onChange={(id) => {
-                    const params = new URLSearchParams(location.search);
-                    params.set("dossierVersion", id);
-                    navigate({ search: params.toString(), hash: "#dossier" });
-                  }}
-                />
-                <Tag
-                  color={
-                    superseded ? "warning" : approved ? "success" : "processing"
-                  }
-                >
-                  {t(
-                    superseded
-                      ? "ledger.state.superseded"
-                      : approved
-                        ? "dossier.approved"
-                        : "dossier.awaiting",
+                  {selected && (
+                    <Tag
+                      color={
+                        superseded
+                          ? "warning"
+                          : approved
+                            ? "success"
+                            : "processing"
+                      }
+                    >
+                      {t(
+                        superseded
+                          ? "ledger.state.superseded"
+                          : approved
+                            ? "dossier.approved"
+                            : "dossier.awaiting",
+                      )}
+                    </Tag>
                   )}
-                </Tag>
-                {dossier?.legacy &&
-                  detail.capabilities.approveDossier &&
-                  !superseded &&
-                  !approved && (
+                </Space>
+                {detail.capabilities.approveDossier &&
+                  ((draft?.available && !approvedRevision) ||
+                    (dossier.legacy &&
+                      selected &&
+                      !approved &&
+                      !superseded)) && (
                     <Button
                       type="primary"
                       loading={busy}
@@ -407,7 +351,7 @@ export function WorkflowDossier({
                       {t("dossier.reviewApproval")}
                     </Button>
                   )}
-              </Space>
+              </div>
               {superseded && (
                 <Alert
                   type="warning"
@@ -415,18 +359,146 @@ export function WorkflowDossier({
                   title={t("dossier.supersededHelp")}
                 />
               )}
-              <ConfirmationHistory
-                confirmations={view.confirmations}
-                bound={{ name: "dossier", hash: selected.hash }}
-              />
-              <DossierContent
-                key={selected.id}
-                snapshot={selected.snapshot}
-                hash={selected.hash}
-                canonicalJson={selected.canonicalJson}
-                workflowId={detail.workflow.id}
-                basePath={basePath}
-              />
+              {dossier.legacy && view.handoff.status !== "complete" && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  title={t("ledger.blocked")}
+                  description={
+                    <ul>
+                      {view.handoff.readiness
+                        .filter((r) => !r.ready)
+                        .map((r) => (
+                          <li key={r.topic}>
+                            {t(`questionnaire.topic.${r.topic}`)} ·{" "}
+                            {r.blockers
+                              .map((b) => t(`ledger.blocker.${b.code}`))
+                              .join(" · ")}
+                          </li>
+                        ))}
+                    </ul>
+                  }
+                />
+              )}
+              {draft || selected ? (
+                <DossierViews
+                  key={selected?.id ?? "working"}
+                  basis={basis}
+                  fields={fields}
+                  context={context}
+                  isDraft={Boolean(draft)}
+                  tab={query.get("dossierTab")}
+                  onTab={(value) => select("dossierTab", value)}
+                  topics={
+                    draft ? (
+                      <WorkingDossierLedger
+                        key={query.get("dossierField") ?? ""}
+                        dossier={draft}
+                        context={context}
+                        linkedField={query.get("dossierField")}
+                        onAsk={(field, handoffId) => {
+                          const params = new URLSearchParams(
+                            questionnaireQuery,
+                          );
+                          params.set("askField", field.id);
+                          if (handoffId) params.set("askHandoff", handoffId);
+                          navigate(`/questionnaire?${params}`);
+                        }}
+                        onSaved={(updated) => {
+                          accept(updated);
+                          onChanged();
+                        }}
+                        onReload={reload}
+                      />
+                    ) : captured ? (
+                      <SnapshotTopics fields={fields} context={context} />
+                    ) : undefined
+                  }
+                  legacyDetails={
+                    selected && !captured ? (
+                      <DossierContent
+                        snapshot={selected.snapshot}
+                        workflowId={detail.workflow.id}
+                        hash={selected.hash}
+                        canonicalJson={null}
+                      />
+                    ) : undefined
+                  }
+                  revisionDetails={
+                    <div className="dossier-content">
+                      <p>
+                        {snapshot?.dossier.workflow.goal ?? detail.version.goal}
+                      </p>
+                      {basis && (
+                        <p>
+                          {format("workingDossier.revision", {
+                            revision: basis.revision,
+                          })}
+                        </p>
+                      )}
+                      {selected && (
+                        <>
+                          <p>
+                            {new Date(selected.createdAt).toLocaleString(
+                              locale,
+                            )}{" "}
+                            · {selected.createdBy}
+                          </p>
+                          <p className="field-label">{t("dossier.hash")}</p>
+                          <code className="dossier-hash">{selected.hash}</code>
+                          <ConfirmationHistory
+                            confirmations={view.confirmations}
+                            bound={{ name: "dossier", hash: selected.hash }}
+                          />
+                        </>
+                      )}
+                      {basis && (
+                        <>
+                          <p className="field-label">{t("dossier.pinsHash")}</p>
+                          <code className="dossier-hash">{basis.pinsHash}</code>
+                        </>
+                      )}
+                      {draft && (
+                        <WorkingDossierApproval
+                          dossier={draft}
+                          previous={
+                            view.versions.find(
+                              (v) =>
+                                v.hash ===
+                                view.confirmation?.boundHashes.dossier,
+                            )?.snapshot.dossier.workingDossier
+                          }
+                          basePath={basePath}
+                          path={dossierPath}
+                        />
+                      )}
+                    </div>
+                  }
+                  json={
+                    draft ? (
+                      <SnapshotJson
+                        data={{
+                          revision: draft.revision,
+                          pinsHash: draft.pinsHash,
+                          pins: draft.pins,
+                          content: draft.content,
+                        }}
+                      />
+                    ) : selected?.canonicalJson != null ? (
+                      <SnapshotJson canonical={selected.canonicalJson} />
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <p className="empty-state">
+                  {t(selectedId ? "workflow.versionMissing" : "dossier.empty")}
+                </p>
+              )}
+              {(draft || dossier.legacy) && (
+                <Link to={`/questionnaire?${questionnaireQuery}&panel=records`}>
+                  {t("ledger.records")}
+                </Link>
+              )}
             </>
           )}
           {dossier?.legacy && editing && (

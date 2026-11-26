@@ -133,9 +133,11 @@ export function DossierFieldValue({
 }
 
 export function DossierFieldList({
+  showOwner = false,
   fields,
   context,
 }: {
+  showOwner?: boolean;
   fields: WorkingDossierField[];
   context: EvidenceContext;
 }) {
@@ -147,7 +149,14 @@ export function DossierFieldList({
           className="working-dossier-field"
           aria-label={field.label}
         >
-          <h4>{field.label}</h4>
+          <h4>
+            {showOwner && (
+              <span className="working-dossier-field-owner">
+                {field.ownerLabel}
+              </span>
+            )}
+            {field.label}
+          </h4>
           <DossierFieldValue field={field} context={context} collapseEvidence />
         </section>
       ))}

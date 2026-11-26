@@ -55,8 +55,8 @@ shared suggestion reviews or perform human sign-offs.
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Sources                | An Engineer pins exact Skill versions, waits for the source check, reviews the current set, and confirms Sources.                                                                                 |
 | Source study           | Copy the prompt for the checked pin set. Inspect the Skill uses, handoffs, routes, and evidence. Record effects that matter to workflow decisions in Executable disclosures.                      |
-| Questionnaire          | Edit working dossier fields and handoffs in the Ledger. Raise assigned Questions, publish reviewed rounds, and link edited fields to reviewed Answers.                                            |
-| Dossier                | The Workflow owner reviews readiness and approves the exact working dossier revision.                                                                                                             |
+| Questionnaire          | Raise assigned Questions, publish rounds, resolve Answers, and review questionnaire records.                                            |
+| Dossier                | Edit working dossier fields and handoffs, apply reviewed Answers, and check readiness. The Workflow owner approves the exact revision.                                                                                                             |
 | Plan and proposal      | Draft or compose the plan from the approved dossier, review its findings, obtain plan and proposal approvals, then explicitly initialize the project.                                             |
 | Package                | Confirm generation, request the kernel's ready Authoring lanes, review their submitted results, and confirm assembly when all required outputs are current.                                       |
 | Evaluation             | Request an evaluation of the assembled package's exact hash and inspect its retained report. Source scripts are not executed by this evaluation.                                                  |
@@ -72,12 +72,12 @@ inputs, not to later changes.
 After the source check passes, open **Source study** and copy the prompt for the
 selected Workflow version. Paste it into an Agent connected to this deployment's
 Engineer MCP. It can use hash-matching workstation files or retrieve the pinned
-bytes. Its submitted changes appear in the diagram and in **Questionnaire →
-Ledger and readiness**. The Ledger shows missing values and open decisions by
-topic. Open **Workflow structure** to add or edit occurrences, handoffs, and
-routes. **Questionnaire records** contains the five-part ledger and round history.
-The Ledger's save actions and the Engineer MCP's `save_working_dossier` update
-the same versioned working dossier. The MCP can save several changes together.
+bytes. Its saved changes appear in **Workflows → Dossier**. The version selector
+opens on the working revision. **Readiness by topic** shows field values,
+their evidence, and open decisions. Expand **Workflow structure** there to
+edit occurrences, handoffs, and routes. The dashboard and the Engineer MCP
+update the same working revision. **Questionnaire records** links to the
+five-part ledger and comparisons with published rounds.
 
 In **Executable disclosures**, record effects that matter to the workflow's
 use of a script. If a Node uploads a report, record what it sends, its
@@ -86,9 +86,12 @@ conditions or approvals in **Questionnaire**.
 
 Use **Ask a Question** on a field to start an assigned draft. Review the submitted
 Answer through the round, then apply it to the field and select its reviewed
-revision. In **Dossier**, open **Saved workflow structure** to inspect the saved
-draft. Approval records the exact revision for planning, including its occurrences,
-handoffs, and routes in **Canonical JSON and record snapshot**.
+revision. In **Dossier**, choose **Workflow diagram** to inspect the handoffs,
+**Workflow details** for workflow-wide fields, or **Revision details** to
+review changes since approval. **Working JSON** shows the saved draft data.
+Selecting a Dossier version switches every tab to that snapshot. Its
+**Canonical JSON and record snapshot** tab displays indented JSON and lets
+you inspect the exact text used for the hash.
 After an edit conflict, reload the team's save and reconcile your changes.
 Earlier workflows with Source study records use their original composition route.
 
@@ -122,8 +125,11 @@ each current Skill version's full hash.
 
 ## Initialize the approved proposal
 
-In **Proposal & initialization**, choose **Initialize project** after the
-Workflow owner approves the proposal. Initialization records the Creator state
+In **Plan and proposal → Plans**, the Engineer records implementation choices
+against the approved Dossier. The Workflow owner approves a saved Plan version.
+In **Proposal & initialization**, the kernel shows what that plan would create
+from the pinned sources, together with warnings and blockers. After the owner
+approves the proposal, the Engineer chooses **Initialize project**. Initialization records the Creator state
 that binds later generation to that proposal.
 
 Once a Creator state exists, the action is **Replace Creator state**. Use it

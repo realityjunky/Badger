@@ -1,4 +1,4 @@
-import { Alert, Button, Select, Space, Tag } from "antd";
+import { Alert, Button, Select, Space, Tabs, Tag } from "antd";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -501,25 +501,39 @@ export function WorkflowsPage() {
                     },
                     {
                       key: "plan",
-                      label: t("plan.title"),
+                      label: t("stage.planProposal"),
                       children: (
-                        <WorkflowPlan
-                          key={`plan-${selectedVersion.id}`}
-                          basePath={basePath}
-                          detail={versionResources}
-                          onChanged={reload}
-                        />
-                      ),
-                    },
-                    {
-                      key: "proposal",
-                      label: t("proposal.title"),
-                      children: (
-                        <WorkflowProposal
-                          key={`proposal-${selectedVersion.id}`}
-                          basePath={basePath}
-                          detail={versionResources}
-                          onChanged={reload}
+                        <Tabs
+                          className="planning-tabs"
+                          animated={false}
+                          activeKey={tab === "proposal" ? "proposal" : "plan"}
+                          onChange={(key) =>
+                            navigate({ search: location.search, hash: key })
+                          }
+                          items={[
+                            {
+                              key: "plan",
+                              label: t("plan.title"),
+                              children: (
+                                <WorkflowPlan
+                                  basePath={basePath}
+                                  detail={versionResources}
+                                  onChanged={reload}
+                                />
+                              ),
+                            },
+                            {
+                              key: "proposal",
+                              label: t("proposal.title"),
+                              children: (
+                                <WorkflowProposal
+                                  basePath={basePath}
+                                  detail={versionResources}
+                                  onChanged={reload}
+                                />
+                              ),
+                            },
+                          ]}
                         />
                       ),
                     },

@@ -8,19 +8,19 @@ import {
 } from "react";
 import { useI18n } from "../../i18n/I18nContext.js";
 
-export type QuestionnaireTab = "questions" | "suggestions" | "ledger";
+export type QuestionnaireTab = "questions" | "suggestions" | "records";
 
 export function QuestionnaireTabs({
   activeTab,
   onChange,
   suggestions,
-  ledger,
+  records,
   children,
 }: {
   activeTab: QuestionnaireTab;
   onChange(tab: QuestionnaireTab): void;
   suggestions?: ReactNode;
-  ledger: ReactNode;
+  records: ReactNode;
   children: ReactNode;
 }) {
   const { t } = useI18n();
@@ -79,10 +79,10 @@ export function QuestionnaireTabs({
             ]
           : []),
         {
-          key: "ledger",
-          label: t("ledger.title"),
-          disabled: !ledger,
-          children: <div className="pane">{ledger}</div>,
+          key: "records",
+          label: t("ledger.records"),
+          disabled: !records,
+          children: <div className="pane">{records}</div>,
         },
       ]}
     />

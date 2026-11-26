@@ -3,7 +3,6 @@ import {
   Alert,
   Button,
   Checkbox,
-  Collapse,
   Input,
   InputNumber,
   Modal,
@@ -53,7 +52,6 @@ import { AnswerTypeDetails } from "./questionnaire/AnswerTypeDetails.js";
 import { QuestionThread } from "./questionnaire/QuestionThread.js";
 import { ConcernPanel } from "./questionnaire/ConcernPanel.js";
 import { QuestionnaireLedger } from "./questionnaire/QuestionnaireLedger.js";
-import { WorkingDossierLedger } from "./working-dossier/WorkingDossierLedger.js";
 import { DossierFieldValue } from "./working-dossier/DossierFields.js";
 import { useWorkingDossier } from "./working-dossier/useWorkingDossier.js";
 import {
@@ -266,11 +264,12 @@ export function QuestionnairePage() {
   const compose = view?.capabilities.compose === true;
   const reviewSuggestions = view?.capabilities.reviewSuggestions === true;
   const activeTab: QuestionnaireTab =
-    !skillSelection && query.get("panel") === "ledger"
-      ? "ledger"
+    !skillSelection && ["records", "ledger"].includes(query.get("panel") ?? "")
+      ? "records"
       : query.get("panel") === "suggestions" && reviewSuggestions
         ? "suggestions"
         : "questions";
+  const askField = query.get("askField");
   const dossierPath =
     workflowSelection &&
     workingDossierPath(
@@ -283,13 +282,13 @@ export function QuestionnairePage() {
   const {
     dossier: workingDossier,
     failure: dossierFailure,
-    accept: acceptDossier,
     reload: reloadDossier,
   } = useWorkingDossier(
     basePath,
     dossierPath,
     workflowSelection?.versionId,
-    activeTab !== "questions" || Boolean(hasDossierTarget || editing?.seed),
+    activeTab !== "questions" ||
+      Boolean(askField || hasDossierTarget || editing?.seed),
   );
   const dossierFields = workingDossier?.projection.fields;
   const dossierContext =
@@ -398,7 +397,7 @@ export function QuestionnairePage() {
     field: WorkingDossierField,
     handoffId?: string,
   ) {
-    if (!selection || !compose) return;
+    if (!view || !selection || !compose) return;
     const assignee = view.assignees.some(
       (person) => person.role === "Field expert",
     )
@@ -443,13 +442,66 @@ export function QuestionnairePage() {
       setQuestionSeed(seed);
       setRoundTitle(t("workingDossier.questionRound"));
       setNewRound(true);
+      navigate(`/questionnaire?${versionQuery}`, { replace: true });
       return;
     }
     setEditing({ roundId: draft.id, seed });
     navigate(
       `/questionnaire?${versionQuery}&round=${encodeURIComponent(draft.id)}`,
+      { replace: true },
     );
   }
+
+  const dossierHref = workflowSelection
+    ? `/workflows/${encodeURIComponent(workflowSelection.workflowId)}/versions/${encodeURIComponent(workflowSelection.versionId)}`
+    : undefined;
+
+  // Follow old shared editor links while keeping historical round comparisons accessible.
+  useEffect(() => {
+    if (query.get("panel") !== "ledger" || !dossierHref || !workingDossier)
+      return;
+    const params = new URLSearchParams(location.search);
+    if (showWorkingDossier && !params.has("sinceRound")) {
+      const field = params.get("dossierField");
+      navigate(
+        {
+          pathname: dossierHref,
+          search: field
+            ? new URLSearchParams({ dossierField: field }).toString()
+            : "",
+          hash: "#dossier",
+        },
+        { replace: true },
+      );
+    } else {
+      params.set("panel", "records");
+      navigate({ search: params.toString() }, { replace: true });
+    }
+  }, [location.search, dossierHref, workingDossier, navigate]);
+
+  useEffect(() => {
+    if (
+      !askField ||
+      !workingDossier ||
+      !workflowView ||
+      workflowView.version.id !== requestedVersionId
+    )
+      return;
+    const field = workingDossier.projection.fields.find(
+      ({ id }) => id === askField,
+    );
+    if (
+      compose &&
+      field &&
+      workingDossier.editable &&
+      workingDossier.available
+    ) {
+      startDossierQuestion(field, query.get("askHandoff") ?? undefined);
+    } else {
+      setFailure(t("workingDossier.editUnavailable"));
+      navigate(`/questionnaire?${versionQuery}`, { replace: true });
+    }
+  }, [askField, workingDossier, workflowView, requestedVersionId]);
 
   const ledgerHistory =
     workflowView && path ? (
@@ -512,6 +564,9 @@ export function QuestionnairePage() {
           ]}
           onChange={(value) => navigate(`/questionnaire?${value}`)}
         />
+        {dossierHref && (
+          <Link to={`${dossierHref}#dossier`}>{t("dossier.title")}</Link>
+        )}
         {view && (
           <Tag>
             {t(
@@ -542,6 +597,14 @@ export function QuestionnairePage() {
         )}
       </div>
       {failure && <Alert type="error" showIcon message={failure} />}
+      {askField && dossierFailure && (
+        <Alert
+          type="error"
+          showIcon
+          title={dossierFailure}
+          action={<ReloadRecordsButton onClick={() => void reloadDossier()} />}
+        />
+      )}
       {workflowView && <StageReviewGuidance stage="questionnaire" />}
       {skillView && (
         <p className="muted">
@@ -576,7 +639,7 @@ export function QuestionnairePage() {
             />
           ) : undefined
         }
-        ledger={
+        records={
           workflowView && path ? (
             <section
               className="questionnaire-ledger"
@@ -584,7 +647,7 @@ export function QuestionnairePage() {
               data-testid="questionnaire-ledger"
             >
               <h2 className="pane-title" id={ledgerHeadingId}>
-                {t("ledger.title")}
+                {t("ledger.records")}
               </h2>
               {dossierFailure && (
                 <Alert
@@ -596,46 +659,17 @@ export function QuestionnairePage() {
                   }
                 />
               )}
-              {workingDossier && dossierContext && showWorkingDossier ? (
-                <>
-                  <WorkingDossierLedger
-                    key={`${path}:${query.get("dossierField") ?? ""}`}
-                    dossier={workingDossier}
-                    context={dossierContext}
-                    linkedField={query.get("dossierField")}
-                    onAsk={startDossierQuestion}
-                    onSaved={(dossier) => {
-                      acceptDossier(dossier);
-                      void reload();
-                    }}
-                    onReload={reloadDossier}
-                  />
-                  <Collapse
-                    defaultActiveKey={
-                      query.has("sinceRound") ? ["history"] : []
-                    }
-                    items={[
-                      {
-                        key: "history",
-                        label: t("ledger.records"),
-                        children: ledgerHistory,
-                      },
-                    ]}
-                  />
-                </>
-              ) : workingDossier ? (
+              {workingDossier && (
                 <>
                   <p className="muted">
                     {t(
                       workingDossier.legacy
                         ? "ledger.legacyDescription"
-                        : "workingDossier.waitForCheck",
+                        : "ledger.recordsHelp",
                     )}
                   </p>
                   {ledgerHistory}
                 </>
-              ) : (
-                !dossierFailure && <p role="status">{t("common.loading")}</p>
               )}
             </section>
           ) : null
@@ -892,7 +926,7 @@ export function QuestionnairePage() {
                                 context={dossierContext}
                               />
                               <Link
-                                to={`/questionnaire?${versionQuery}&panel=ledger&dossierField=${encodeURIComponent(field.id)}`}
+                                to={`${dossierHref}?dossierField=${encodeURIComponent(field.id)}#dossier`}
                               >
                                 {t("workingDossier.openField")}
                               </Link>

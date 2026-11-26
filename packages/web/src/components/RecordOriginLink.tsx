@@ -19,7 +19,7 @@ export function RecordOriginLink({
       ? `/questionnaire/questions/${encodeURIComponent(origin.recordId)}`
       : kind === "source-study"
         ? `${workflow}?studyRecord=${encodeURIComponent(origin.recordId)}&studyRevision=${origin.revision}#source-study`
-        : `/questionnaire?${new URLSearchParams({ workflow: workflowId, version: origin.workflowVersionId, panel: "ledger" })}`;
+        : `/questionnaire?${new URLSearchParams({ workflow: workflowId, version: origin.workflowVersionId, panel: "records" })}`;
   return (
     <p className="muted">
       <Link to={href}>

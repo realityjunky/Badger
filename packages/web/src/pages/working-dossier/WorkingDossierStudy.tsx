@@ -115,6 +115,7 @@ export function WorkingDossierStudy({
   dossier,
   context,
   showPinnedHashes = false,
+  standalone = true,
 }: {
   dossier: Pick<
     WorkingDossierView,
@@ -122,6 +123,7 @@ export function WorkingDossierStudy({
   > & { prompt?: string | null };
   context: EvidenceContext;
   showPinnedHashes?: boolean;
+  standalone?: boolean;
 }) {
   const { t, format } = useI18n();
   const inspectorId = useId();
@@ -331,19 +333,21 @@ export function WorkingDossierStudy({
 
   return (
     <div className="working-dossier-study">
-      <div className="working-dossier-toolbar">
-        <span className="muted" role="status">
-          {format("workingDossier.revision", { revision: dossier.revision })}
-        </span>
-        {dossier.prompt && (
-          <Button
-            type="primary"
-            onClick={() => void copyPrompt(dossier.prompt!)}
-          >
-            {t("workingDossier.copyPrompt")}
-          </Button>
-        )}
-      </div>
+      {standalone && (
+        <div className="working-dossier-toolbar">
+          <span className="muted" role="status">
+            {format("workingDossier.revision", { revision: dossier.revision })}
+          </span>
+          {dossier.prompt && (
+            <Button
+              type="primary"
+              onClick={() => void copyPrompt(dossier.prompt!)}
+            >
+              {t("workingDossier.copyPrompt")}
+            </Button>
+          )}
+        </div>
+      )}
       <DossierDiagram
         content={content}
         selection={selected}
@@ -488,15 +492,17 @@ export function WorkingDossierStudy({
           ),
         }))}
       />
-      <details className="working-dossier-workflow-details">
-        <summary>{t("workingDossier.workflowDetails")}</summary>
-        <DossierFieldList
-          fields={projection.fields.filter(
-            (field) => field.scope === "workflow",
-          )}
-          context={context}
-        />
-      </details>
+      {standalone && (
+        <details className="working-dossier-workflow-details">
+          <summary>{t("workingDossier.workflowDetails")}</summary>
+          <DossierFieldList
+            fields={projection.fields.filter(
+              (field) => field.scope === "workflow",
+            )}
+            context={context}
+          />
+        </details>
+      )}
       {prompt && (
         <Modal
           open

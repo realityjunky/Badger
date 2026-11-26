@@ -154,12 +154,25 @@ test("an Engineer edits bounded rework and removes dependent or stale dossier re
   const saved = await api<WorkingDossierView>(page, "PATCH", path, edit);
   const ledger = `${base}/questionnaire?workflow=${workflow.id}&version=${version.id}&panel=ledger`;
   await page.goto(ledger);
-  const ledgerPanel = page.getByRole("region", {
-    name: "Ledger and readiness",
-  });
+  const ledgerPanel = page.getByTestId("workflow-dossier");
+  await expect(page).toHaveURL(`${base}${root}#dossier`);
   await expect(
     ledgerPanel.getByRole("region", { name: "Readiness by topic" }),
   ).toBeVisible();
+  await ledgerPanel.getByRole("tab", { name: "Working JSON" }).click();
+  await ledgerPanel.getByLabel("JSON section").selectOption("content");
+  expect(
+    JSON.parse(await ledgerPanel.locator("pre.dossier-json").innerText()),
+  ).toEqual(saved.content);
+  await ledgerPanel.getByRole("tab", { name: "Readiness by topic" }).click();
+  await ledgerPanel
+    .getByRole("button", { name: "Ask a Question", exact: true })
+    .first()
+    .click();
+  await expect(page.getByRole("dialog", { name: "New round" })).toBeVisible();
+  await page.getByRole("button", { name: "Create round", exact: true }).click();
+  await expect(page.getByLabel("Question text", { exact: true })).toBeVisible();
+  await page.goto(`${base}${root}#dossier`);
   await expect(
     ledgerPanel.getByRole("button", { name: "Add route", exact: true }),
   ).toBeHidden();
@@ -185,7 +198,7 @@ test("an Engineer edits bounded rework and removes dependent or stale dossier re
   await page.goto(`${base}${root}#dossier`);
   const dossierPanel = page.getByTestId("workflow-dossier");
   await dossierPanel
-    .getByRole("button", { name: "Saved workflow structure", exact: true })
+    .getByRole("tab", { name: "Workflow diagram", exact: true })
     .click();
   await dossierPanel.getByRole("tab", { name: "Routes", exact: true }).click();
   await dossierPanel
@@ -201,9 +214,9 @@ test("an Engineer edits bounded rework and removes dependent or stale dossier re
   await expect(detail).toContainText("Retry if a date cannot be rendered.");
   await expect(detail).toContainText("Visit limit 2");
   await dossierPanel
-    .getByRole("link", { name: "Edit working dossier", exact: true })
+    .getByRole("tab", { name: "Readiness by topic", exact: true })
     .click();
-  await expect(page).toHaveURL(ledger);
+  await expect(page).toHaveURL(/dossierTab=topics#dossier$/u);
   await page.getByText("Workflow structure", { exact: true }).click();
   const occurrence = page.locator(".working-dossier-toolbar").filter({
     has: page.getByText("render-notice", { exact: true }),

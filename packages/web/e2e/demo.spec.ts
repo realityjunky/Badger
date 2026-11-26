@@ -72,8 +72,7 @@ test("browse all seven demo pages and follow fixture records without live reques
   ).toBeHidden();
   for (const label of [
     "Dossier",
-    "Plans",
-    "Proposal & initialization",
+    "Plan and proposal",
     "Review & publication",
   ]) {
     await expect(

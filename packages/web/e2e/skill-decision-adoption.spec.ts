@@ -418,11 +418,11 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     await confirmSources(service, engineer, workflow);
     await admin.goto(`${base}${path}#dossier`);
     const dossierPanel = admin.getByTestId("workflow-dossier");
-    const readiness = dossierPanel.getByRole("button", {
-      name: /^Readiness by topic/u,
+    const readiness = dossierPanel.getByRole("region", {
+      name: "Readiness by topic",
     });
     await expect(readiness).toContainText("topics with blockers");
-    await readiness.click();
+
     await expect(dossierPanel.getByText(/^Workflow · Scope —/u)).toBeVisible();
 
     const supportingFields: Record<string, DossierFieldValue> = {};
@@ -460,9 +460,7 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
       },
     );
     await expect(readiness).toContainText("Ready");
-    const scope = dossierPanel.getByRole("listitem").filter({
-      has: admin.getByText("Scope", { exact: true }),
-    });
+    const scope = readiness.getByRole("button", { name: /^Scope Ready$/u });
     await expect(scope.getByText("Ready", { exact: true })).toBeVisible();
     await expect(dossierPanel.getByText(/^Workflow · Scope —/u)).toHaveCount(0);
     await dossierPanel
@@ -488,6 +486,28 @@ test("a Skill decision stays with its reviewed version and reaches only workflow
     const approved = await api<DossierView>(admin, "GET", `${path}/dossier`);
     expect(approved.confirmation?.invalidatedAt).toBeNull();
     expect(approved.confirmation?.boundHashes.dossier).toBe(hash);
+    await dossierPanel
+      .getByRole("combobox", { name: "Dossier version" })
+      .click();
+    await admin
+      .locator(".ant-select-item-option")
+      .filter({ hasText: "Dossier version 1" })
+      .click();
+    await dossierPanel.getByRole("tab", { name: "Workflow details" }).click();
+    await expect(
+      dossierPanel.getByRole("heading", { name: "Scope", exact: true }),
+    ).toBeVisible();
+    await dossierPanel
+      .getByRole("tab", { name: "Canonical JSON and record snapshot" })
+      .click();
+    const json = dossierPanel.locator("pre.dossier-json");
+    const canonical = approved.versions[0]!.canonicalJson!;
+    await expect(json).toHaveText(
+      JSON.stringify(JSON.parse(canonical), null, 2),
+      { useInnerText: true },
+    );
+    await dossierPanel.getByLabel("Show exact canonical text").check();
+    expect(await json.textContent()).toBe(canonical);
     await engineer.goto(`${base}/questionnaire?${query}`);
     await expert
       .getByTestId("answer-box")

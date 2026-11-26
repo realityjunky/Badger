@@ -229,7 +229,7 @@ const en = {
 
   "proposal.title": "Proposal & initialization",
   "proposal.description":
-    "Review the kernel's proposal for the approved plan. The Workflow owner approves it before the Engineer initializes the project.",
+    "Review the workflow and pinned sources the kernel resolved from the approved plan. The Workflow owner approves this proposal before project initialization.",
   "proposal.needPlan": "Approve the current plan to see its proposal.",
   "proposal.hash": "Proposal hash",
   "proposal.blockers": "Proposal blockers",
@@ -260,7 +260,7 @@ const en = {
     "{name} · {version}: proposal approval superseded",
   "plan.title": "Plans",
   "plan.description":
-    "Draft from the approved dossier, review the kernel's findings, and save an immutable plan for the Workflow owner's approval.",
+    "The plan records how to implement the approved dossier. The Engineer saves a version for the Workflow owner to approve.",
   "plan.needDossier": "Approve the current dossier before planning.",
   "plan.empty": "No plan version has been saved yet.",
   "plan.edit": "Edit plan",
@@ -478,6 +478,17 @@ const en = {
   "notifications.event.concern-raised": "Expert concern raised",
   "notifications.event.job-submitted": "Draft submitted",
   "dossier.title": "Dossier",
+  "dossier.revisionDetails": "Revision details",
+  "dossier.workingJson": "Working JSON",
+  "dossier.originalJson": "Show exact canonical text",
+  "dossier.jsonSection": "JSON section",
+  "dossier.fullJson": "Full document",
+  "dossier.pinsHash": "Pinned source set hash",
+  "ledger.recordsHelp":
+    "Review the facts, questions, and sign-offs behind the dossier. Choose a published round to compare its records with today’s.",
+  "proposal.project": "Project initialization",
+  "proposal.projectHelp":
+    "After proposal approval, the Engineer initializes the Project. Its Creator state is the starting point for package generation.",
   "workingDossier.title": "Working dossier",
   "workingDossier.revision": "Working dossier revision {revision}",
   "workingDossier.copyPrompt": "Copy prompt",
@@ -1992,7 +2003,7 @@ const zh: Record<MessageId, string> = {
   "inbox.proposalInvalidated": "{name} · {version}：提案审批已失效",
   "plan.title": "计划",
   "plan.description":
-    "从已批准的语义档案起草计划，查看内核校验结果，并保存不可变的计划版本供工作流所有者批准。",
+    "计划记录如何实现已批准的语义档案。工程师保存计划版本，由工作流负责人审批。",
   "plan.needDossier": "请先批准当前语义档案，再开始计划。",
   "plan.empty": "尚未保存计划版本。",
   "plan.edit": "编辑计划",
@@ -2195,6 +2206,17 @@ const zh: Record<MessageId, string> = {
   "notifications.event.concern-raised": "专家提出关切",
   "notifications.event.job-submitted": "草稿提交",
   "dossier.title": "语义档案",
+  "dossier.revisionDetails": "修订详情",
+  "dossier.workingJson": "工作档案 JSON",
+  "dossier.originalJson": "显示原始规范文本",
+  "dossier.jsonSection": "JSON 分区",
+  "dossier.fullJson": "完整文档",
+  "dossier.pinsHash": "固定来源集哈希",
+  "ledger.recordsHelp":
+    "查看档案所依据的事实、问题和确认记录。选择已发布轮次可与当前记录进行比较。",
+  "proposal.project": "项目初始化",
+  "proposal.projectHelp":
+    "提案批准后，工程师初始化项目。生成软件包将从此项目的 Creator 状态开始。",
   "workingDossier.title": "工作档案",
   "workingDossier.revision": "工作档案修订 {revision}",
   "workingDossier.copyPrompt": "复制提示词",

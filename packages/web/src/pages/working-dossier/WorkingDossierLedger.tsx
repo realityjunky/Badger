@@ -48,6 +48,9 @@ export function WorkingDossierLedger({
     entries.push(field);
     fieldsByTopic.set(field.topic, entries);
   }
+  const blockedTopics = dossier.readiness.filter(
+    ({ blockers }) => blockers.length > 0,
+  ).length;
   const defaultTopic =
     dossier.readiness.find(({ blockers }) => blockers.length)?.topic ?? "scope";
   const nodes = Object.entries(dossier.content.nodes);
@@ -107,13 +110,6 @@ export function WorkingDossierLedger({
       className="working-dossier-ledger"
       aria-label={t("workingDossier.title")}
     >
-      <div className="working-dossier-toolbar">
-        <h3>
-          <span role="status">
-            {format("workingDossier.revision", { revision: dossier.revision })}
-          </span>
-        </h3>
-      </div>
       {!dossier.available && (
         <Alert type="info" showIcon title={t("workingDossier.waitForCheck")} />
       )}
@@ -321,7 +317,13 @@ export function WorkingDossierLedger({
       </div>
       {field && renderField(field)}
       <section aria-label={t("ledger.readiness")}>
-        <h3>{t("ledger.readiness")}</h3>
+        <p role="status">
+          <Tag color={blockedTopics ? "warning" : "success"}>
+            {blockedTopics
+              ? format("workingDossier.topicsBlocked", { count: blockedTopics })
+              : t("ledger.ready")}
+          </Tag>
+        </p>
         <Collapse
           bordered={false}
           className="ledger-readiness-topics"

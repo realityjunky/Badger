@@ -1,6 +1,6 @@
 import { Alert, Button, Modal, Space, Spin, Tag } from "antd";
 import { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import type { ProposalView } from "../../api/proposals.js";
 import { questionnaireRequest } from "../../api/questionnaire.js";
 import type {
@@ -178,24 +178,6 @@ export function WorkflowProposal({
                 {t("proposal.reviewApproval")}
               </Button>
             )}
-          {approved && detail.capabilities.initialize && (
-            <Button
-              type="primary"
-              disabled={busy || pending}
-              onClick={() =>
-                view &&
-                setReview({
-                  kind: "initialize",
-                  view,
-                  requestId: crypto.randomUUID(),
-                })
-              }
-            >
-              {t(
-                view?.currentState ? "proposal.replace" : "proposal.initialize",
-              )}
-            </Button>
-          )}
           <ReloadRecordsButton
             disabled={busy}
             onClick={() => {
@@ -221,7 +203,12 @@ export function WorkflowProposal({
           )}
           <ConfirmationHistory confirmations={view.confirmations} />
           {!proposal ? (
-            <Alert type="info" showIcon title={t("proposal.needPlan")} />
+            <Alert
+              type="info"
+              showIcon
+              title={t("proposal.needPlan")}
+              description={<Link to="#plan">{t("plan.title")}</Link>}
+            />
           ) : (
             <>
               <p>{proposal.goal}</p>
@@ -267,27 +254,57 @@ export function WorkflowProposal({
               ))}
             </>
           )}
-          {view.currentState && (
-            <>
-              <h3>{t("proposal.currentState")}</h3>
-              <code className="gate-confirmation-hash">
-                {view.currentState.hash}
-              </code>
-            </>
-          )}
-          {view.jobs.length > 0 && (
-            <div role="status" aria-live="polite">
-              <h3>{t("proposal.jobs")}</h3>
-              <ul>
-                {view.jobs.map((job) => (
-                  <li key={job.id}>
-                    <Tag>{t(`proposal.status.${job.status}`)}</Tag>
-                    {job.error}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <section
+            className="project-initialization"
+            aria-label={t("proposal.project")}
+          >
+            <h3>{t("proposal.project")}</h3>
+            <p className="muted">{t("proposal.projectHelp")}</p>
+            {approved && detail.capabilities.initialize && (
+              <Button
+                type="primary"
+                disabled={busy || pending}
+                onClick={() =>
+                  view &&
+                  setReview({
+                    kind: "initialize",
+                    view,
+                    requestId: crypto.randomUUID(),
+                  })
+                }
+              >
+                {t(
+                  view?.currentState
+                    ? "proposal.replace"
+                    : "proposal.initialize",
+                )}
+              </Button>
+            )}
+            {view.currentState && (
+              <>
+                <h3>{t("proposal.currentState")}</h3>
+                <code className="gate-confirmation-hash">
+                  {view.currentState.hash}
+                </code>
+              </>
+            )}
+            {view.jobs.length > 0 && (
+              <div role="status" aria-live="polite">
+                <h3>{t("proposal.jobs")}</h3>
+                <ul>
+                  {view.jobs.map((job) => (
+                    <li key={job.id}>
+                      <Tag>{t(`proposal.status.${job.status}`)}</Tag>
+                      {job.error}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {view.currentState && (
+              <Link to="#package">{t("package.title")}</Link>
+            )}
+          </section>
         </>
       )}
       <Modal
