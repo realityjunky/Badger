@@ -18,6 +18,8 @@ export function PlanEditor({
   initialPlan,
   job,
   onClose,
+  returning,
+  onReturnToAgent,
   onSaved,
 }: {
   basePath: string;
@@ -26,6 +28,8 @@ export function PlanEditor({
   initialPlan: FactoryPlan;
   job?: PlanDraftingJob;
   onClose(): void;
+  returning: boolean;
+  onReturnToAgent(job: PlanDraftingJob): void;
   onSaved(): void;
 }) {
   const { t } = useI18n();
@@ -153,10 +157,39 @@ export function PlanEditor({
   return (
     <>
       <Modal
-        open={review === null}
+        open={review === null && !returning}
         width={1000}
-        title={t(job ? "plan.reviewSuggestion" : "plan.edit")}
-        footer={null}
+        title={t(
+          repair
+            ? "plan.reviewRepair"
+            : job
+              ? "plan.reviewSuggestion"
+              : "plan.edit",
+        )}
+        styles={
+          repair
+            ? { body: { maxHeight: "60dvh", overflowY: "auto" } }
+            : undefined
+        }
+        footer={
+          <>
+            {job && repair && (
+              <Button disabled={busy} onClick={() => onReturnToAgent(job)}>
+                {t("plan.sendBack")}
+              </Button>
+            )}
+            <Button
+              type="primary"
+              loading={busy}
+              disabled={
+                validating || !composition || composition.findings.length > 0
+              }
+              onClick={() => void run(preview)}
+            >
+              {t(repair ? "plan.previewVersion" : "plan.reviewSave")}
+            </Button>
+          </>
+        }
         onCancel={() => {
           if (!busy) onClose();
         }}
@@ -221,23 +254,13 @@ export function PlanEditor({
           )}
         </div>
         {failure && <Alert type="error" showIcon title={failure} />}
-        <Button
-          type="primary"
-          loading={busy}
-          disabled={
-            validating || !composition || composition.findings.length > 0
-          }
-          onClick={() => void run(preview)}
-        >
-          {t("plan.reviewSave")}
-        </Button>
       </Modal>
       <Modal
         open={review !== null}
         width={900}
         title={t("plan.reviewSave")}
         okText={t(job ? "plan.accept" : "plan.save")}
-        cancelText={t("plan.backToEdit")}
+        cancelText={t(repair ? "plan.backToReview" : "plan.backToEdit")}
         confirmLoading={busy}
         closable={!busy}
         maskClosable={!busy}

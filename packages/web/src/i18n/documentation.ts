@@ -145,7 +145,7 @@ export const documentationEn = {
   "documentation.workflows.plan":
     "In Plan and proposal → Plans, choose Request plan draft, then use Copy Agent prompt on the queued draft. When the Agent finishes, choose Review plan suggestion. Resolve the plan findings and confirm Accept as a plan version. Use Edit plan to compose a version directly.",
   "documentation.workflows.plan.drafts":
-    "Use the draft ID to match an Agent session to its row. Delete draft is available for an unclaimed, unaccepted draft. A draft with an active claim becomes eligible after the Agent finishes or releases it.",
+    "Open Draft details to see the job ID or delete an unclaimed, unaccepted draft. Expand Earlier drafts to find completed jobs and the lane drafts included in a repair.",
   "documentation.workflows.plan.approve":
     "The Workflow owner selects the saved version and uses Review plan approval to approve its exact plan and dossier hashes. Then review the derived proposal in the Proposal approval row.",
   "documentation.workflows.checks.title": "Workflow approvals and checks",
@@ -177,7 +177,7 @@ export const documentationEn = {
   "documentation.workflows.findings.revise":
     "After fixing a lane-local concern, open its accepted report and choose Request revised draft. The new job receives the current inputs and earlier findings. If a repair job is already queued, use Copy Agent prompt on that job.",
   "documentation.workflows.findings.followUp":
-    "Agents finish independent lane reports in parallel. Once the wave finishes, Badger queues one Plan repair for its Plan findings. Copy the Agent prompt in Package or Plans. Review the proposed changes and response to each finding, then accept or send the draft back to the Agent. For a saved lane draft from an earlier Plan, use Request agent reconciliation.",
+    "When the wave finishes, Badger groups its plan findings into one repair. On a queued repair, copy the Agent prompt. When it is ready, choose Review plan repair to read the findings and proposed changes. Choose Preview plan version to continue to acceptance, or Send back to agent to request specific changes. Use Request agent reconciliation when an earlier draft still needs a repair.",
   "documentation.workflows.findings.badger":
     "A Badger issue names the handoff, generator, WorkflowRuntime, or Agent host area that needs a fix. Package records the issue and waits for the fix. Regenerate when the fix changes the generator or generated package.",
   "documentation.workflows.evaluation":
@@ -461,7 +461,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.plan":
     "在“计划与提案 → 计划”中选择“请求起草计划”，然后在排队中的草稿上选择“复制 Agent 提示词”。Agent 结束起草会话后，选择“审阅计划建议”。处理计划检查发现的问题，再确认“接受为计划版本”。也可用“编辑计划”直接编写新版本。",
   "documentation.workflows.plan.drafts":
-    "通过草稿 ID 查找与 Agent 会话对应的记录。未被领取且未被接受的草稿可用“删除草稿”移除。已领取的草稿需等 Agent 结束会话或释放任务后才能删除。",
+    "展开“草稿详情”可查看任务 ID，或删除未被领取且未被接受的草稿。“早期草稿”包含已结束的任务和已纳入修订的分工草稿。",
   "documentation.workflows.plan.approve":
     "工作流负责人选择已保存的版本，使用“审阅计划批准”批准对应的计划和语义档案哈希，再到提案审批行审核由该计划生成的提案。",
   "documentation.workflows.checks.title": "工作流审批与检查",
@@ -493,7 +493,7 @@ export const documentationZh: Record<keyof typeof documentationEn, string> = {
   "documentation.workflows.findings.revise":
     "处理好通道本身的问题后，打开已接受的报告，选择“请求修改稿”。新任务会收到当前输入及此前的问题。若已有修复任务在排队，请在该任务上选择“复制 Agent 提示词”。",
   "documentation.workflows.findings.followUp":
-    "同一组的分工由 Agent 并行起草报告。所有报告完成后，Badger 会将涉及计划的发现汇总成一个计划修订任务。在软件包或计划页复制 Agent 提示词。审阅更改和对每项发现的答复，然后接受草稿或退回 Agent 修订。对于旧计划上的草稿，使用“请求 Agent 协调修订”。",
+    "同一轮的报告完成后，Badger 会将涉及计划的问题汇总为一项修订。在排队中的修订上复制 Agent 提示词。待 Agent 提交后，选择“审阅计划修订”，查看各项问题和拟议更改。选择“预览计划版本”可继续确认接受，也可选择“退回给 Agent”并说明需要修改的内容。早期草稿仍需合并时，可选择“请求 Agent 协调修订”。",
   "documentation.workflows.findings.badger":
     "Badger 问题会标明需修复的范围，包括编写任务交接、软件包生成器、WorkflowRuntime 或 Agent 宿主。问题记录在“软件包”中，等待修复。如果修复改变了生成器或生成的软件包，需重新生成。",
   "documentation.workflows.evaluation":

@@ -2777,6 +2777,59 @@ button.rail-link {
   justify-items: stretch;
   grid-template-columns: minmax(0, 1fr);
 }
+.plan-drafting-jobs,
+.plan-draft-list {
+  display: grid;
+  gap: 12px;
+}
+.plan-draft-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.plan-draft-row {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--badger-color-border);
+  border-radius: var(--badger-radius-panel);
+  overflow-wrap: anywhere;
+}
+.plan-draft-row[aria-current="true"] {
+  border-color: var(--badger-color-accent);
+}
+.plan-draft-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.plan-draft-heading h4 {
+  font-size: 1rem;
+}
+.plan-draft-heading code,
+.plan-draft-details {
+  color: var(--badger-color-text-secondary);
+}
+.plan-draft-guidance {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+.plan-draft-history > summary,
+.plan-draft-details > summary {
+  cursor: pointer;
+  padding-block: 4px;
+}
+.plan-draft-history > summary {
+  font-weight: 600;
+}
+.plan-draft-history > ul,
+.plan-draft-details[open] > :not(summary) {
+  margin-block-start: 8px;
+}
 .proposal-action-controls details > button {
   margin-block-start: 8px;
 }

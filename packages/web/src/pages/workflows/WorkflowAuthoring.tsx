@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import type {
   AuthoringReadiness,
   AuthoringRepairTarget,
+  AuthoringWaveId,
 } from "@realityjunky/badger";
 import type { AuthoringDraftingJob } from "../../api/drafting-jobs.js";
 import {
@@ -58,7 +59,7 @@ type View = {
   current: boolean;
   readiness: AuthoringReadiness;
   jobs: LaneJob[];
-  planRepairs?: { id: string; status: string; wave: string }[];
+  planRepairs?: { id: string; status: string; wave: AuthoringWaveId }[];
   followUps: (StageFollowUp & {
     jobId: string;
     laneId: string;
@@ -507,7 +508,7 @@ export function WorkflowAuthoring({
                   hash: "plan",
                 }}
               >
-                {format("plan.waveRepair", { wave: repair.wave })}
+                {t(`plan.repair.${repair.wave}`)}
               </Link>
               <Tag>
                 {t(

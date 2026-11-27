@@ -10,7 +10,7 @@ import {
   Tag,
   Tooltip,
 } from "antd";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { FactoryPlan, PlanView } from "../../api/plans.js";
 import type {
@@ -33,7 +33,7 @@ import { WorkflowPanel } from "./WorkflowPanel.js";
 import { WorkflowProposal } from "./WorkflowProposal.js";
 import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
 import { selectedWorkflowTab } from "./WorkflowTabs.js";
-import { AgentPromptButton } from "../../components/AgentPromptButton.js";
+import { PlanDraftingJobs } from "./PlanDraftingJobs.js";
 import { AuthoringStageFinding } from "./AuthoringStageFinding.js";
 
 export function WorkflowPlan({
@@ -52,7 +52,6 @@ export function WorkflowPlan({
   const navigate = useNavigate();
   const active = ["plan", "proposal"].includes(selectedWorkflowTab(location));
   const section = useRef<HTMLElement>(null);
-  const selectedDraftRow = useRef<HTMLLIElement>(null);
   const [view, setView] = useState<PlanView | null>(null);
   const [jobs, setJobs] = useState<PlanDraftingJob[]>([]);
   const [failure, setFailure] = useState<string | null>(null);
@@ -86,9 +85,6 @@ export function WorkflowPlan({
     navigate({ search: params.toString(), hash: "#plan" });
   }
   const selectedDraft = jobs.find((job) => job.id === draftId);
-  const visibleJobs = selectedDraft
-    ? [selectedDraft, ...jobs.filter((job) => job.id !== draftId)]
-    : jobs;
   const selected =
     view?.versions.find((v) => v.id === selectedId) ??
     view?.versions.find((v) => v.id === view.headVersionId);
@@ -155,13 +151,19 @@ export function WorkflowPlan({
     return () => window.clearInterval(timer);
   }, [active, connected]);
   useEffect(() => {
-    if (location.hash === "#plan" && !params.has("planTab") && view)
+    if (location.hash === "#plan" && !params.has("planTab") && !draftId && view)
       section.current?.scrollIntoView({ block: "start" });
   }, [location.key, Boolean(view)]);
-  useEffect(() => {
-    if (active && selectedDraft && (!tab || tab === "jobs"))
-      selectedDraftRow.current?.scrollIntoView({ block: "center" });
-  }, [active, selectedDraft?.id, tab]);
+  const revealDraft = useCallback(
+    (row: HTMLLIElement | null) => {
+      if (!active || !row || (tab && tab !== "jobs")) return;
+      const history = row.closest<HTMLDetailsElement>("details");
+      if (history) history.open = true;
+      row.focus({ preventScroll: true });
+      row.scrollIntoView({ block: "center" });
+    },
+    [active, tab],
+  );
 
   async function changed() {
     setRefresh((r) => r + 1);
@@ -197,8 +199,11 @@ export function WorkflowPlan({
       "POST",
       { revision: job.revision, confirmed: true },
     );
+    navigate({
+      search: new URLSearchParams({ planDraft: repair.id }).toString(),
+      hash: "#plan",
+    });
     await changed();
-    return path + "/drafting-jobs/" + repair.id + "/prompt";
   }
   async function deleteDraft() {
     if (!deleting) return;
@@ -244,6 +249,10 @@ export function WorkflowPlan({
     setApproval(null);
     await changed();
   }
+  function askForDraftChanges(job: PlanDraftingJob) {
+    setFailure(null);
+    setDiscard({ job, reason: "", requestId: crypto.randomUUID() });
+  }
   async function discardSuggestion() {
     if (!discard) return;
     const body = { revision: discard.job.revision, reason: discard.reason };
@@ -255,6 +264,7 @@ export function WorkflowPlan({
         { ...body, confirmed: true },
       );
       setDiscard(null);
+      setEditing(null);
       navigate({
         search: new URLSearchParams({ planDraft: discard.job.id }).toString(),
         hash: "plan",
@@ -446,161 +456,33 @@ export function WorkflowPlan({
               )}
               <PlanTabs version={selected} tab={tab} onTab={selectTab}>
                 {detail.capabilities.editPlan && jobs.length > 0 ? (
-                  <ul className="questionnaire-concerns">
-                    {visibleJobs.map((job) => {
-                      const successor = [...jobs]
-                        .reverse()
-                        .find(
-                          (other) =>
-                            other.planRepair?.sourceDraftIds.includes(job.id) &&
-                            other.status !== "cancelled",
-                        );
-                      return (
-                        <li
-                          key={job.id}
-                          ref={
-                            job.id === draftId ? selectedDraftRow : undefined
-                          }
-                        >
-                          {job.id === draftId && findingId ? (
-                            <AuthoringStageFinding
-                              basePath={basePath}
-                              path={path}
-                              stage="plan"
-                            />
-                          ) : (
-                            job.authoringFollowUp && (
-                              <Alert
-                                type="info"
-                                title={format("authoring.findingOrigin", {
-                                  lane: job.authoringFollowUp.lane,
-                                })}
-                                description={
-                                  job.authoringFollowUp.action.requirement
-                                }
-                              />
-                            )
-                          )}
-                          {successor && (
-                            <Button
-                              type="link"
-                              onClick={() =>
-                                navigate({
-                                  search: new URLSearchParams({
-                                    planDraft: successor.id,
-                                  }).toString(),
-                                  hash: "plan",
-                                })
-                              }
-                            >
-                              {t("plan.openRepair")}
-                            </Button>
-                          )}
-                          <Space wrap>
-                            {job.planRepair && (
-                              <strong>
-                                {format("plan.waveRepair", {
-                                  wave: job.planRepair.wave,
-                                })}
-                              </strong>
-                            )}
-                            <span className="plan-draft-id">
-                              {t("plan.draft")} <code>{job.id}</code>
-                            </span>
-                            <Tag>
-                              {t(
-                                job.reconciliationHeadId &&
-                                  ["submitted", "cancelled"].includes(
-                                    job.status,
-                                  )
-                                  ? "plan.newerVersion"
-                                  : `drafting.state.${job.status}`,
-                              )}
-                            </Tag>
-                            {!job.reconciliationHeadId &&
-                              ["queued", "submitted"].includes(job.status) &&
-                              detail.capabilities.editPlan && (
-                                <AgentPromptButton
-                                  basePath={basePath}
-                                  path={`${path}/drafting-jobs/${job.id}/prompt`}
-                                />
-                              )}
-                            {job.reconciliationHeadId &&
-                            ["submitted", "cancelled"].includes(job.status) ? (
-                              <AgentPromptButton
-                                basePath={basePath}
-                                path={() => requestRepair(job)}
-                                label={t("plan.requestAgentRepair")}
-                                disabled={
-                                  busy ||
-                                  !view.skeleton ||
-                                  (!!successor &&
-                                    !["queued", "submitted"].includes(
-                                      successor.status,
-                                    ))
-                                }
-                              />
-                            ) : (
-                              job.status === "submitted" && (
-                                <Button
-                                  disabled={busy || !view.skeleton}
-                                  onClick={() =>
-                                    setEditing({
-                                      plan: structuredClone(
-                                        (job.review?.result ?? job.result!)
-                                          .plan,
-                                      ),
-                                      job,
-                                    })
-                                  }
-                                >
-                                  {t("plan.reviewSuggestion")}
-                                </Button>
-                              )
-                            )}
-                            {job.status === "submitted" && (
-                              <Button
-                                disabled={busy}
-                                onClick={() =>
-                                  setDiscard({
-                                    job,
-                                    reason: "",
-                                    requestId: crypto.randomUUID(),
-                                  })
-                                }
-                              >
-                                {t(
-                                  job.planRepair
-                                    ? "plan.sendBack"
-                                    : "drafting.discard",
-                                )}
-                              </Button>
-                            )}
-                            {job.status !== "claimed" &&
-                              job.status !== "accepted" && (
-                                <Button
-                                  danger
-                                  disabled={busy}
-                                  onClick={() => {
-                                    setFailure(null);
-                                    setDeleting(job);
-                                  }}
-                                >
-                                  {t("plan.deleteDraft")}
-                                </Button>
-                              )}
-                          </Space>
-                          {job.feedback && <p>{job.feedback.reason}</p>}
-                          {job.status === "claimed" &&
-                            (job.review?.result ?? job.result) && (
-                              <p className="muted" role="status">
-                                {t("plan.draftSaved")}
-                              </p>
-                            )}
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  <PlanDraftingJobs
+                    jobs={jobs}
+                    basePath={basePath}
+                    path={path}
+                    selectedId={draftId}
+                    selectedRow={revealDraft}
+                    selectedFinding={
+                      findingId && (
+                        <AuthoringStageFinding
+                          basePath={basePath}
+                          path={path}
+                          stage="plan"
+                        />
+                      )
+                    }
+                    busy={busy}
+                    hasSkeleton={!!view.skeleton}
+                    onRequestRepair={(job) =>
+                      void run(() => requestRepair(job))
+                    }
+                    onReview={(job, plan) => setEditing({ job, plan })}
+                    onDiscard={askForDraftChanges}
+                    onDelete={(job) => {
+                      setFailure(null);
+                      setDeleting(job);
+                    }}
+                  />
                 ) : (
                   <p className="empty-state">
                     {t(
@@ -620,6 +502,8 @@ export function WorkflowPlan({
                   initialPlan={editing.plan}
                   job={editing.job}
                   onClose={() => setEditing(null)}
+                  returning={!!discard}
+                  onReturnToAgent={askForDraftChanges}
                   onSaved={() => {
                     setEditing(null);
                     void changed();
@@ -683,6 +567,7 @@ export function WorkflowPlan({
         }}
         onOk={() => void run(discardSuggestion)}
       >
+        {discard?.job.planRepair && <p>{t("plan.returnHelp")}</p>}
         <label className="field-label" htmlFor="plan-discard-reason">
           {t(discard?.job.planRepair ? "plan.feedback" : "drafting.reason")}
         </label>

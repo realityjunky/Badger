@@ -3,6 +3,7 @@ import type { FactoryPlan } from "./plans.js";
 import type {
   AuthoringLaneAction,
   AuthoringLaneFinding,
+  AuthoringWaveId,
   ScriptEffectSuggestion,
   SkillScriptSideEffect,
 } from "@realityjunky/badger";
@@ -87,7 +88,7 @@ export interface PlanDraftingJob extends Omit<
   review: DraftingReview<PlanAgentResult> | null;
   planRepair?: {
     packageId: string;
-    wave: string;
+    wave: AuthoringWaveId;
     basePlanVersionId: string;
     reportIds: string[];
     sourceDraftIds: string[];
