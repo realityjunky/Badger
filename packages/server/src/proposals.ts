@@ -48,7 +48,10 @@ export async function approvedProposal(
   proposalHash: string,
 ) {
   return (
-    (await readGateConfirmations(tx, versionId, "proposal")).find(
+    [
+      ...(await readGateConfirmations(tx, versionId, "workflow-build")),
+      ...(await readGateConfirmations(tx, versionId, "proposal")),
+    ].find(
       (confirmation) =>
         confirmation.invalidatedAt === null &&
         confirmation.boundHashes.proposal === proposalHash,
@@ -85,8 +88,13 @@ export async function loadProposal(
   personId: string,
 ) {
   const plan = await readPlanHead(tx, versionId);
-  const approval = (await readGateConfirmations(tx, versionId, "plan")).find(
-    (confirmation) => confirmation.invalidatedAt === null,
+  const approval = [
+    ...(await readGateConfirmations(tx, versionId, "workflow-build")),
+    ...(await readGateConfirmations(tx, versionId, "plan")),
+  ].find(
+    (confirmation) =>
+      confirmation.invalidatedAt === null &&
+      confirmation.boundHashes.plan === plan?.hash,
   );
   const check = await readSourceCheck(tx, versionId);
   if (
@@ -96,6 +104,15 @@ export async function loadProposal(
     (await planGateState(tx, versionId, personId)).findings.length
   )
     return null;
+  return proposalForPlan(config, versionId, plan, check.pinsHash);
+}
+
+export async function proposalForPlan<
+  T extends Pick<
+    NonNullable<Awaited<ReturnType<typeof readPlanHead>>>,
+    "hash" | "snapshot"
+  >,
+>(config: ServiceConfig, versionId: string, plan: T, pinsHash: string) {
   const { root } = workspaceLocation(config, versionId);
   const planPath = path.join(root, "plans", `${plan.hash}.json`);
   await materializePlan(
@@ -116,7 +133,7 @@ export async function loadProposal(
     proposal,
     root,
     planPath,
-    pinsHash: check.pinsHash,
+    pinsHash,
     serviceBlockers,
   };
 }

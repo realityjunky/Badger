@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   createWorkflowKernel,
+  canonicalHash,
   generateFromApprovedProposal,
   type AuthoringPlan,
 } from "@realityjunky/badger";
@@ -9,6 +10,7 @@ import { recordAudit, type AuditWriteContext } from "./audit.js";
 import { readGateConfirmations } from "./gates.js";
 import { closeGateInbox } from "./inbox.js";
 import { generationInputs } from "./packages.js";
+import { requestLaneJobs } from "./authoring.js";
 import { invalidateGeneratedPackage } from "./package-invalidation.js";
 import { publicKernelMessage } from "./proposals.js";
 import {
@@ -91,18 +93,26 @@ export async function runGeneration(
       );
     }
     const { loaded, state, approval } = inputs;
+    const mappedBuild =
+      approval?.gate === "workflow-build" &&
+      approval.id === job.generationConfirmationId;
     const confirmation = (
-      await readGateConfirmations(tx, job.workflowVersionId, "generation")
+      await readGateConfirmations(
+        tx,
+        job.workflowVersionId,
+        mappedBuild ? "workflow-build" : "generation",
+      )
     ).find(
       (c) => c.id === job.generationConfirmationId && c.invalidatedAt === null,
     );
     if (
-      !inputs.current ||
+      (!mappedBuild && !inputs.current) ||
       !loaded ||
-      !state ||
+      !loaded.proposal.canInitialize ||
+      loaded.serviceBlockers.length ||
       !confirmation ||
       confirmation.boundHashes.implementation !== inputs.implementationHash ||
-      state.hash !== job.creatorStateHash ||
+      (state?.hash ?? canonicalHash(null)) !== job.creatorStateHash ||
       approval?.id !== job.proposalConfirmationId ||
       loaded.plan.hash !== job.planVersionHash ||
       loaded.proposal.proposalHash !== job.proposalHash ||
@@ -193,10 +203,27 @@ export async function runGeneration(
         JSON.stringify(inputs.implementationFiles),
       ],
     );
-    await tx.query(
-      `update workflow_kernel_states set state_json = $2, hash = $3, state_namespace = $4, revision = revision + 1 where workflow_version_id = $1`,
-      [job.workflowVersionId, stateJson, stateHash, namespace],
-    );
+    if (mappedBuild)
+      await tx.query(
+        `insert into workflow_kernel_states(workflow_version_id,plan_version_hash,proposal_hash,proposal_confirmation_id,initialized_job_id,state_namespace,state_json,hash,initialized_at)
+       values($1,$2,$3,$4,$5,$6,$7,$8,$9) on conflict(workflow_version_id) do update set plan_version_hash=excluded.plan_version_hash,proposal_hash=excluded.proposal_hash,proposal_confirmation_id=excluded.proposal_confirmation_id,initialized_job_id=excluded.initialized_job_id,state_namespace=excluded.state_namespace,state_json=excluded.state_json,hash=excluded.hash,initialized_at=excluded.initialized_at,revision=workflow_kernel_states.revision+1`,
+        [
+          job.workflowVersionId,
+          job.planVersionHash,
+          job.proposalHash,
+          job.proposalConfirmationId,
+          job.id,
+          namespace,
+          stateJson,
+          stateHash,
+          dependencies.clock.now(),
+        ],
+      );
+    else
+      await tx.query(
+        `update workflow_kernel_states set state_json = $2, hash = $3, state_namespace = $4, revision = revision + 1 where workflow_version_id = $1`,
+        [job.workflowVersionId, stateJson, stateHash, namespace],
+      );
     await tx.query(
       `update workflow_versions set stages = stages || jsonb_build_object('package','active',
       'evaluation',case when stages->>'evaluation' = 'todo' then 'todo' else 'invalidated' end,
@@ -210,6 +237,22 @@ export async function runGeneration(
       "generation",
       dependencies.clock.now(),
     );
+    if (mappedBuild) {
+      const workflow = (
+        await tx.query<{ workflow_id: string }>(
+          "select workflow_id from workflow_versions where id=$1",
+          [job.workflowVersionId],
+        )
+      ).rows[0]!;
+      await requestLaneJobs(
+        tx,
+        config,
+        dependencies,
+        { personId: job.requesterId, workerId, requestId: job.id },
+        workflow.workflow_id,
+        job.workflowVersionId,
+      );
+    }
     return finish("succeeded", {
       status: "generated",
       blockers: [],

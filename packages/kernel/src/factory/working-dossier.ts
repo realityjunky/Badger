@@ -1,4 +1,10 @@
-import type { SkillSourceFile } from "../types.js";
+import type { SkillSourceFile, WorkflowTransition } from "../types.js";
+import type {
+  WorkflowMapContract,
+  MapHook,
+  MapAnnotation,
+  WorkflowMapSeed,
+} from "./workflow-map.js";
 import { canonicalHash } from "../util.js";
 import {
   SEMANTIC_DOSSIER_TOPICS,
@@ -116,6 +122,11 @@ export interface DossierInterface {
   consumerEvidence: DossierEvidence[];
 }
 export interface DossierRoute {
+  order?: number;
+  diagramOnly?: boolean;
+  when?: WorkflowTransition["when"];
+  outcome?: WorkflowTransition["condition"];
+  hooks?: MapHook[];
   from: string;
   to: string;
   kind: "next" | "optional" | "rework";
@@ -128,6 +139,7 @@ export interface DossierFinding {
   evidence: DossierEvidence[];
 }
 export interface WorkingDossierContent {
+  contract?: WorkflowMapContract;
   fields: Record<string, DossierFieldValue>;
   nodes: Record<string, DossierOccurrence>;
   interfaces: Record<string, DossierInterface>;
@@ -149,6 +161,7 @@ export interface WorkingDossierRevision {
   content: WorkingDossierContent;
 }
 export interface WorkingDossierEdit {
+  contract?: WorkflowMapContract;
   revision: number;
   pinsHash: string;
   editId: string;
@@ -171,6 +184,8 @@ export interface DossierRestatementChoice {
 }
 
 export interface WorkingDossierView extends WorkingDossierRevision {
+  approvedPlanSeed?: { hash: string; edit?: WorkflowMapSeed; problem?: string };
+  annotations?: Record<string, MapAnnotation[]>;
   available: boolean;
   legacy: boolean;
   editable: boolean;
@@ -253,8 +268,174 @@ const changes = (keys: object, values: object) => ({
   maxProperties: 500,
   additionalProperties: { anyOf: [values, { type: "null" }] },
 });
+const validationKind = {
+  enum: [
+    "evidence-only",
+    "artifact-exists",
+    "artifact-structured",
+    "semantic",
+    "state-transition",
+  ],
+};
+const decisionScope = object(
+  {
+    artifacts: array(
+      object({ id: shortText, required: { type: "boolean" } }, ["id"]),
+      256,
+    ),
+    evidence: array(
+      object({ id: shortText, required: { type: "boolean" } }, ["id"]),
+      256,
+    ),
+  },
+  [],
+);
+const transitionTarget = { anyOf: [shortText, { type: "null" }] };
+const mappedDecision = object(
+  {
+    id: shortText,
+    question: shortText,
+    choices: array(
+      object(
+        {
+          id: shortText,
+          label: shortText,
+          to: transitionTarget,
+          target: transitionTarget,
+          transition: transitionTarget,
+          inputs: { type: "object" },
+          routing: { type: "object", additionalProperties: shortText },
+        },
+        ["id", "label"],
+      ),
+      256,
+    ),
+    inputs: { type: "object" },
+    rationale: { type: "object" },
+    scope: decisionScope,
+    reviewer: object(
+      { subjects: array(shortText, 256), authorities: array(shortText, 256) },
+      [],
+    ),
+  },
+  ["id", "question", "choices"],
+);
 export const WORKING_DOSSIER_EDIT_SCHEMA = object(
   {
+    contract: object(
+      {
+        nodes: {
+          type: "object",
+          propertyNames: identifier,
+          maxProperties: 500,
+          additionalProperties: object(
+            {
+              kind: {
+                enum: [
+                  "action",
+                  "control",
+                  "producer",
+                  "decision",
+                  "handoff",
+                  "guardrail",
+                ],
+              },
+              outputSchemas: array(shortText, 256),
+              guardrails: array(
+                object(
+                  {
+                    id: shortText,
+                    label: shortText,
+                    validation: validationKind,
+                    prerequisite: { type: "object" },
+                    verification: { type: "object" },
+                  },
+                  ["id", "label", "validation"],
+                ),
+                256,
+              ),
+              decision: mappedDecision,
+              approvalRequirements: array(
+                object(
+                  {
+                    decisionId: shortText,
+                    choiceId: shortText,
+                    artifacts: array(shortText, 256),
+                  },
+                  ["decisionId", "choiceId", "artifacts"],
+                ),
+                256,
+              ),
+              augmentations: array(
+                { type: "object", required: ["skill"] },
+                256,
+              ),
+              satisfies: array(shortText, 256),
+              optional: { type: "boolean" },
+              disabled: { type: "boolean" },
+              operations: array({
+                enum: ["require", "augment", "override", "disable"],
+              }),
+              binding: { type: "object" },
+              callBindings: { type: "object" },
+            },
+            ["kind", "outputSchemas", "guardrails"],
+          ),
+        },
+        outputSchemas: array(
+          {
+            type: "object",
+            properties: {
+              id: shortText,
+              description: shortText,
+              artifacts: array(
+                object(
+                  {
+                    id: shortText,
+                    kind: { enum: ["file", "directory", "state", "report"] },
+                    required: { type: "boolean" },
+                    paths: array(shortText, 256),
+                    validations: array(validationKind),
+                    lifetime: { enum: ["attempt", "cycle", "run"] },
+                    verification: { enum: ["content", "receipt"] },
+                    root: shortText,
+                    requireCurrentAttempt: { type: "boolean" },
+                  },
+                  ["id", "kind", "required", "paths", "validations"],
+                ),
+                512,
+              ),
+              evidence: array(
+                object({ id: shortText, required: { type: "boolean" } }, [
+                  "id",
+                  "required",
+                ]),
+                512,
+              ),
+            },
+            required: ["id", "artifacts", "evidence", "description"],
+          },
+          512,
+        ),
+        fields: { anyOf: [{ type: "array" }, { type: "object" }] },
+        routes: array({ type: "object", required: ["id", "nodeOrder"] }, 512),
+        terminalTransitions: array(
+          { type: "object", required: ["from", "condition"] },
+          512,
+        ),
+        cycles: array(
+          {
+            type: "object",
+            required: ["key", "entry", "repeatTransitions", "maxInstances"],
+          },
+          256,
+        ),
+        capabilities: { type: "object" },
+        finalization: { type: "object" },
+        patches: { type: "object" },
+      },
+      ["nodes", "outputSchemas"],
+    ),
     revision: { ...positiveInteger, minimum: 0 },
     pinsHash: digest,
     editId: identifier,
@@ -323,6 +504,21 @@ export const WORKING_DOSSIER_EDIT_SCHEMA = object(
           kind: { enum: ["next", "optional", "rework"] },
           condition: shortText,
           maxVisits: positiveInteger,
+          outcome: { enum: ["success", "failure", "pause"] },
+          order: { ...positiveInteger, minimum: 0 },
+          diagramOnly: { type: "boolean" },
+          when: { anyOf: [shortText, { type: "array" }, { type: "object" }] },
+          hooks: array(
+            object(
+              {
+                id: identifier,
+                event: shortText,
+                handler: shortText,
+                field: fieldIdentifier,
+              },
+              ["id", "event", "handler", "field"],
+            ),
+          ),
         },
         ["from", "to", "kind"],
       ),
@@ -348,6 +544,7 @@ export const WORKING_DOSSIER_INSTRUCTIONS =
   "Use these field IDs: workflow/workflow/<key>, skill/<skillId>/<key>, node/<occurrenceId>/<key>, interface/<interfaceId>/<key>. " +
   "Inspect each Skill's instructions, relevant references and scripts without executing them. " +
   "Fill the fields that affect authoring and cite the pinned file and lines. " +
+  "Map executable behavior once in the same edit schema. Supply contract.nodes keyed by occurrence ID with kind, guardrails, output schema IDs, decisions, reviewer, choices and scoped approvalRequirements. Supply contract.outputSchemas, capabilities, terminalTransitions and bounded cycles as needed. Use occurrence parents for Required Skill Calls. Routes carry executable outcome and when. A hook names its host event, handler and evidence field. Keep open meaning in linked Questionnaire fields. The kernel derives the Plan from these records. Re-read current records and only revise the affected behavior. " +
   "Use Executable disclosures for script effects that matter to a recorded use of a Skill. Identify the action, what it affects, and any condition or approval the workflow must handle. Record uncertainties that need a Questionnaire decision as material findings. " +
   "Trace each handoff from a producer's output to a consumer's input. " +
   "Check formats, required values and conditions at both ends. Identify each distinct use of a Skill, including a review triggered by another stage, and the evidence needed to resume it. " +
@@ -385,6 +582,9 @@ export function applyWorkingDossierEdit(
   return {
     fields: changedEntries(current.fields, edit.fields),
     nodes: changedEntries(current.nodes, edit.nodes),
+    ...((edit.contract ?? current.contract) && {
+      contract: edit.contract ?? current.contract,
+    }),
     interfaces: changedEntries(current.interfaces, edit.interfaces),
     ...(current.routes || edit.routes
       ? { routes: changedEntries(current.routes ?? {}, edit.routes) }

@@ -96,3 +96,11 @@ export async function hasLegacyAuthoring(tx: Queryable, versionId: string) {
     )
   ).rows[0]!.present;
 }
+
+export async function usesWorkflowMapping(tx: Queryable, versionId: string) {
+  const saved = await tx.query(
+    "select 1 from working_dossier_revisions where workflow_version_id=$1 limit 1",
+    [versionId],
+  );
+  return Boolean(saved.rowCount) || !(await hasLegacyAuthoring(tx, versionId));
+}

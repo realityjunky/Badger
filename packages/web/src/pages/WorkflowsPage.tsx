@@ -40,6 +40,7 @@ import { WorkflowDossier } from "./workflows/WorkflowDossier.js";
 import { WorkflowPlan } from "./workflows/WorkflowPlan.js";
 import { WorkflowPublication } from "./workflows/WorkflowPublication.js";
 import { WorkflowPackage } from "./workflows/WorkflowPackage.js";
+import { WorkflowRelease } from "./workflows/WorkflowRelease.js";
 import { WorkflowNotifications } from "./workflows/WorkflowNotifications.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 
@@ -304,7 +305,10 @@ export function WorkflowsPage() {
                   <Tag>{entry.locale}</Tag>
                 </div>
                 {entry.latestVersion !== null && (
-                  <StageTrack stages={entry.latestVersion.stages} />
+                  <StageTrack
+                    stages={entry.latestVersion.stages}
+                    mapped={entry.latestVersion.workflowMapping}
+                  />
                 )}
               </article>
             ))}
@@ -440,6 +444,7 @@ export function WorkflowsPage() {
                           <Tag>{selectedVersion.locale}</Tag>
                         </Space>
                         <StageTrack
+                          mapped={versionResources?.workflowMapping}
                           stages={
                             versionResources?.version.id === selectedVersion.id
                               ? versionResources.version.stages
@@ -474,65 +479,97 @@ export function WorkflowsPage() {
                         />
                       ),
                     },
-                    {
-                      key: "source-study",
-                      label: t("stage.sourceStudy"),
-                      children: (
-                        <WorkflowSourceStudy
-                          key={selectedVersion.id}
-                          basePath={basePath}
-                          detail={versionResources}
-                          onChanged={reload}
-                        />
-                      ),
-                    },
-                    {
-                      key: "dossier",
-                      label: t("dossier.title"),
-                      children: (
-                        <WorkflowDossier
-                          key={`dossier-${selectedVersion.id}`}
-                          basePath={basePath}
-                          detail={versionResources}
-                          onChanged={reload}
-                        />
-                      ),
-                    },
-                    {
-                      key: "plan",
-                      label: t("stage.planProposal"),
-                      children: (
-                        <WorkflowPlan
-                          basePath={basePath}
-                          detail={versionResources}
-                          onChanged={reload}
-                        />
-                      ),
-                    },
-                    {
-                      key: "package",
-                      label: t("package.title"),
-                      children: (
-                        <WorkflowPackage
-                          key={`package-${selectedVersion.id}`}
-                          basePath={basePath}
-                          detail={versionResources}
-                          onChanged={reload}
-                        />
-                      ),
-                    },
-                    {
-                      key: "review-publication",
-                      label: t("publication.title"),
-                      children: (
-                        <WorkflowPublication
-                          key={`publication-${selectedVersion.id}`}
-                          basePath={basePath}
-                          detail={versionResources}
-                          onChanged={reload}
-                        />
-                      ),
-                    },
+                    ...(versionResources.workflowMapping &&
+                    !parameters.has("dossierVersion") &&
+                    !parameters.has("planDraft") &&
+                    !parameters.has("authoringFinding")
+                      ? [
+                          {
+                            key: "mapping",
+                            label: t("mapping.title"),
+                            children: (
+                              <WorkflowSourceStudy
+                                key={selectedVersion.id}
+                                basePath={basePath}
+                                detail={versionResources}
+                                onChanged={reload}
+                              />
+                            ),
+                          },
+                          {
+                            key: "release",
+                            label: t("mapping.release"),
+                            children: (
+                              <WorkflowRelease
+                                key={selectedVersion.id}
+                                basePath={basePath}
+                                detail={versionResources}
+                                onChanged={reload}
+                              />
+                            ),
+                          },
+                        ]
+                      : [
+                          {
+                            key: "source-study",
+                            label: t("stage.sourceStudy"),
+                            children: (
+                              <WorkflowSourceStudy
+                                key={selectedVersion.id}
+                                basePath={basePath}
+                                detail={versionResources}
+                                onChanged={reload}
+                              />
+                            ),
+                          },
+                          {
+                            key: "dossier",
+                            label: t("dossier.title"),
+                            children: (
+                              <WorkflowDossier
+                                key={`dossier-${selectedVersion.id}`}
+                                basePath={basePath}
+                                detail={versionResources}
+                                onChanged={reload}
+                              />
+                            ),
+                          },
+                          {
+                            key: "plan",
+                            label: t("stage.planProposal"),
+                            children: (
+                              <WorkflowPlan
+                                basePath={basePath}
+                                detail={versionResources}
+                                onChanged={reload}
+                              />
+                            ),
+                          },
+                          {
+                            key: "package",
+                            label: t("package.title"),
+                            children: (
+                              <WorkflowPackage
+                                key={`package-${selectedVersion.id}`}
+                                basePath={basePath}
+                                detail={versionResources}
+                                onChanged={reload}
+                              />
+                            ),
+                          },
+                          {
+                            key: "review-publication",
+                            label: t("publication.title"),
+                            children: (
+                              <WorkflowPublication
+                                key={`publication-${selectedVersion.id}`}
+                                basePath={basePath}
+                                detail={versionResources}
+                                onChanged={reload}
+                              />
+                            ),
+                          },
+                        ]),
                   ]
                 : []),
             ]}

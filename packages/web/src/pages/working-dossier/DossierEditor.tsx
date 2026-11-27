@@ -556,11 +556,24 @@ export function DossierEditor({
         layout="vertical"
         disabled={busy || unavailable}
         initialValues={route ?? { kind: "next" }}
-        onFinish={({ from, to, kind, condition, maxVisits }) => {
+        onFinish={({
+          from,
+          to,
+          kind,
+          condition,
+          maxVisits,
+          outcome,
+          hooks,
+        }) => {
           if (unavailable) return;
           void save({
             routes: {
               [id]: {
+                ...(route?.when && { when: route.when }),
+                ...(route?.order !== undefined && { order: route.order }),
+                ...(route?.diagramOnly && { diagramOnly: true }),
+                ...(outcome && { outcome }),
+                ...(hooks?.length && { hooks }),
                 from,
                 to,
                 kind,
@@ -581,6 +594,63 @@ export function DossierEditor({
             options={options}
           />
         </Form.Item>
+        <Form.Item name="outcome" label={t("mapping.outcome")}>
+          <Select
+            allowClear
+            options={["success", "failure", "pause"].map((value) => ({
+              value,
+              label: value,
+            }))}
+          />
+        </Form.Item>
+        <Form.List name="hooks">
+          {(entries, { add, remove }) => (
+            <>
+              {entries.map(({ key, name }) => (
+                <section key={key}>
+                  <Form.Item name={[name, "id"]} label="ID" rules={required}>
+                    <Input maxLength={128} />
+                  </Form.Item>
+                  <Form.Item
+                    name={[name, "event"]}
+                    label={t("mapping.event")}
+                    rules={required}
+                  >
+                    <Input />
+                  </Form.Item>
+                  <Form.Item
+                    name={[name, "handler"]}
+                    label={t("mapping.handler")}
+                    rules={required}
+                  >
+                    <Input />
+                  </Form.Item>
+                  <Form.Item
+                    name={[name, "field"]}
+                    label={t("mapping.fileEvidence")}
+                    rules={required}
+                  >
+                    <Select
+                      showSearch
+                      options={dossier.projection.fields
+                        .filter((field) => field.content)
+                        .map((field) => ({
+                          value: field.id,
+                          label: field.ownerLabel + " · " + field.label,
+                        }))}
+                    />
+                  </Form.Item>
+                  <Button onClick={() => remove(name)}>
+                    {t("mapping.hookRemove")}
+                  </Button>
+                </section>
+              ))}
+              <Button onClick={() => add({ id: crypto.randomUUID() })}>
+                {t("mapping.addHook")}
+              </Button>
+            </>
+          )}
+        </Form.List>
         <Form.Item
           name="to"
           label={t("workingDossier.routeTo")}

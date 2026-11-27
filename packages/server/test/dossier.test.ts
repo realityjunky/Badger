@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
+import { reportLaneOutput } from "./fixtures/authoring.js";
+import { planningRequest } from "./fixtures/planning.js";
 import {
   startTestService,
   type TestPerson,
@@ -291,6 +293,250 @@ it("keeps one saved partial dossier across retries and refuses stale edits", asy
     }),
   );
 });
+
+it("builds from one mapped revision, stages one writer and an independent review, and fences stale builds", async () => {
+  const { base, group, workflow } = await setup();
+  const { skill } = await call(
+    "/skills",
+    "POST",
+    { groupId: group.id, name: "report-source" },
+    admin,
+    201,
+  );
+  const body =
+    "---\nname: report-source\ndescription: Produce a reviewed report\n---\n\nRecord a report.\n";
+  const files = [
+    { path: "SKILL.md", content: Buffer.from(body).toString("base64") },
+  ];
+  const { preview: upload } = await call(
+    `/skills/${skill.id}/upload-preview`,
+    "POST",
+    { files },
+  );
+  await call(
+    `/skills/${skill.id}/versions`,
+    "POST",
+    { files, expectedHash: upload.hash, confirmed: true },
+    engineer,
+    201,
+  );
+  await call(
+    base + "/pins",
+    "POST",
+    { skillId: skill.id, hash: upload.hash },
+    engineer,
+    201,
+  );
+  await service.runSourceCheckJobs();
+  const source = await call(base + "/gates/sources/preview", "POST", {});
+  await call(base + "/gates/sources/commit", "POST", {
+    confirmationHash: source.preview.confirmationHash,
+    requestId: "pins",
+  });
+  const map = await call(base + "/working-dossier");
+  const evidence = [
+    {
+      skillId: skill.id,
+      hash: upload.hash,
+      path: "SKILL.md",
+      fileHash: createHash("sha256").update(body).digest("hex"),
+      startLine: 6,
+      endLine: 6,
+    },
+  ];
+  const fields = Object.fromEntries(
+    [
+      ...map.projection.fields
+        .filter((f: { required: boolean }) => f.required)
+        .map((f: { id: string }) => f.id),
+      "node/report/responsibility",
+      "node/report/inputs",
+      "node/report/outputSchemas",
+      "node/report/trigger",
+    ].map((id) => [
+      id,
+      { state: "source", value: "Prepare a reviewed report.", evidence },
+    ]),
+  );
+  const edit = {
+    revision: map.revision,
+    pinsHash: map.pinsHash,
+    editId: "mapped",
+    fields,
+    nodes: {
+      report: {
+        label: "Report",
+        skillId: skill.id,
+        hash: upload.hash,
+        order: 0,
+        kind: "node",
+      },
+    },
+    contract: {
+      nodes: {
+        report: {
+          kind: "action",
+          outputSchemas: ["report.v1"],
+          guardrails: [],
+        },
+      },
+      outputSchemas: [
+        {
+          id: "report.v1",
+          description: "Report results",
+          artifacts: [],
+          evidence: [{ id: "summary", required: true }],
+        },
+      ],
+    },
+  };
+  await call(base + "/working-dossier", "PATCH", edit);
+  const gate = base + "/gates/workflow-build";
+  await call(gate + "/preview", "POST", {}, expert, 403);
+  const last = await call(gate + "/preview", "POST", {});
+  expect(last.plan.customNodes[0].implementation.skill).toBe("report-source");
+  const submit = {
+    confirmationHash: last.preview.confirmationHash,
+    requestId: "build",
+  };
+  const built = await call(gate + "/commit", "POST", submit);
+  expect(await call(gate + "/commit", "POST", submit)).toEqual(built);
+  for (const stage of ["dossier", "plan", "proposal", "generation"])
+    expect((await call(base + "/gates/" + stage)).confirmations).toEqual([]);
+  const done = await service.worker().runOnce();
+  expect(done?.error).toBeNull();
+  expect(done?.status).toBe("succeeded");
+  expect(
+    (
+      await call(
+        base + "/package/authoring-jobs",
+        "POST",
+        { confirmed: true },
+        engineer,
+        201,
+      )
+    ).jobs,
+  ).toEqual([]);
+  const all = (await call(base + "/package/authoring")).jobs;
+  expect(all.map((j: { laneId: string }) => j.laneId)).toEqual([
+    "workflow-entry",
+  ]);
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "Mapped agent", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const api = planningRequest(service);
+  for (const lane of ["workflow-entry", "skill-review"]) {
+    const job = (await call(base + "/package/authoring")).jobs.find(
+      (entry: { laneId: string }) => entry.laneId === lane,
+    );
+    const path = base + "/drafting-jobs/" + job.id;
+    const claim = await api(
+      path + "/claim",
+      "POST",
+      { revision: job.revision },
+      engineer,
+      200,
+      secret,
+    );
+    const bundle = claim.contextBundle;
+    const result = {
+      laneOutput: reportLaneOutput(bundle),
+      ...(lane === "workflow-entry" && {
+        nodeGuidance: reportLaneOutput({
+          ...bundle,
+          authoring: {
+            ...bundle.authoring,
+            lane: "skill-core",
+            handoff: bundle.authoring.companion.handoff,
+          },
+        }),
+      }),
+    };
+    await api(
+      path + "/submit",
+      "POST",
+      {
+        leaseId: claim.job.lease.id,
+        contextHash: claim.job.contextHash,
+        result,
+      },
+      engineer,
+      200,
+      secret,
+    );
+  }
+  const candidate = (await call(base + "/package")).package.assembledHash;
+  expect(candidate).toMatch(/^[a-f0-9]{64}$/);
+  await call(base + "/review/approve-preview", "POST", {}, owner, 409);
+  expect((await call(base + "/evaluations")).jobs).toEqual([
+    expect.objectContaining({
+      status: "queued",
+      evaluationPackageHash: candidate,
+    }),
+  ]);
+  const evaluation = await service.worker().runOnce();
+  expect(evaluation?.status, JSON.stringify(evaluation?.outcome)).toBe(
+    "succeeded",
+  );
+  const review = await call(base + "/review", "GET", undefined, owner);
+  expect(review.behavior).toMatchObject({
+    mapRevision: 1,
+    changes: expect.arrayContaining(["Report"]),
+  });
+  for (const action of ["approve", "publish"]) {
+    const { preview } = await call(
+      base + "/review/" + action + "-preview",
+      "POST",
+      {},
+      owner,
+    );
+    await call(
+      base + "/review/" + action,
+      "POST",
+      {
+        confirmed: true,
+        confirmationHash: preview.confirmationHash,
+        requestId: "mapped-" + action,
+      },
+      owner,
+    );
+  }
+  await call(base + "/working-dossier", "PATCH", {
+    ...edit,
+    editId: "revised",
+    revision: 1,
+    fields: {
+      ...fields,
+      "node/report/responsibility": {
+        state: "source",
+        value: "Record report evidence.",
+        evidence,
+      },
+    },
+  });
+  await call(
+    gate + "/commit",
+    "POST",
+    { ...submit, requestId: "stale" },
+    engineer,
+    409,
+  );
+  expect((await call(base + "/package")).package.status).toBe("invalidated");
+  expect(
+    (
+      await call(
+        "/workflows/" + workflow.id + "/publications",
+        "GET",
+        undefined,
+        owner,
+      )
+    ).publications[0].packageHash,
+  ).toBe(candidate);
+}, 60000);
 
 function semantics(factId: string) {
   const topic = {

@@ -3065,3 +3065,34 @@ button.rail-link {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.map-edge-symbols {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 2px;
+  z-index: 2;
+}
+.map-edge-symbols button {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: var(--ant-color-bg-container, Canvas);
+  color: var(--ant-color-primary, LinkText);
+  cursor: pointer;
+}
+.map-edge-symbols button:is(:focus-visible, [aria-pressed="true"]) {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+.map-annotation-inspector {
+  border-inline-start: 3px solid var(--ant-color-primary, LinkText);
+  padding: 4px 16px;
+  margin-block: 8px;
+  overflow-wrap: anywhere;
+}
+.workflow-map-editor {
+  width: 100%;
+}

@@ -1,5 +1,6 @@
 import { initializeAuthoringSession } from "../authoring/lifecycle.js";
 import { buildAuthoringPlan } from "../authoring/plan.js";
+import { recordMappedReferences } from "../authoring/mapped-package.js";
 import type { AuthoringDepth } from "../authoring/types.js";
 import type { CreatorState, FactoryProposal } from "../types.js";
 import { generatePackage, type GeneratedPackage } from "./generate.js";
@@ -52,12 +53,18 @@ export async function generateFromApprovedProposal(
     sourceRoots: options.sourceRoots,
     authoringDepth: options.depth,
   });
+  const authoringPlan = await buildAuthoringPlan({
+    proposal,
+    depth: options.depth,
+  });
   const updated = await initializeAuthoringSession({
     state,
-    plan: await buildAuthoringPlan({ proposal, depth: options.depth }),
+    plan: authoringPlan,
     generated: options.findingLineage
       ? { ...generated, findingLineage: options.findingLineage }
       : generated,
   });
+  if (plan.semanticDossier?.workingDossier?.content.contract)
+    await recordMappedReferences(updated, authoringPlan);
   return { state: updated, proposal, generated };
 }

@@ -10,6 +10,7 @@ import {
   reviewState,
   type CreatorState,
   type PackageSnapshot,
+  type FactoryPlan,
 } from "@realityjunky/badger";
 import type { Queryable } from "./database/database.js";
 import type { ServiceConfig } from "./config.js";
@@ -90,7 +91,75 @@ export async function reviewView(
   } catch (error) {
     if (!(error instanceof RequestError)) throw error;
   }
+  let behavior;
+  if (
+    loaded?.saved.authoring_plan.semanticDossier?.workingDossier?.content
+      .contract
+  ) {
+    const current = (
+      await tx.query<{ id: string; canonical_json: string }>(
+        "select id,canonical_json from plan_versions where workflow_version_id=$1 and hash=$2",
+        [versionId, loaded.saved.plan_version_hash],
+      )
+    ).rows[0];
+    const previous = (
+      await tx.query<{ canonical_json: string; package_hash: string }>(
+        `select pv.canonical_json,p.package_hash from published_packages p
+      join workflow_versions v on v.id=p.workflow_version_id join workflow_packages pkg on pkg.id=p.package_id
+      join plan_versions pv on pv.workflow_version_id=p.workflow_version_id and pv.hash=pkg.plan_version_hash
+      where v.workflow_id=(select workflow_id from workflow_versions where id=$1) and p.package_id<>$2
+      order by p.published_at desc,p.id desc limit 1`,
+        [versionId, loaded.saved.id],
+      )
+    ).rows[0];
+    if (current) {
+      const plan: FactoryPlan = JSON.parse(current.canonical_json).plan;
+      const before: FactoryPlan["workflow"] | undefined =
+        previous && JSON.parse(previous.canonical_json).plan.workflow;
+      const changes: string[] = [];
+      const oldNodes = new Map(
+        before?.customNodes.map((node) => [node.id, node]),
+      );
+      for (const node of plan.workflow.customNodes) {
+        if (
+          canonicalHash(oldNodes.get(node.id) ?? null) !== canonicalHash(node)
+        )
+          changes.push(node.label);
+        oldNodes.delete(node.id);
+      }
+      for (const node of oldNodes.values()) changes.push(node.label);
+      for (const key of [
+        "goal",
+        "nodes",
+        "outputSchemas",
+        "routing",
+        "cycles",
+        "capabilities",
+        "finalization",
+      ] as const)
+        if (
+          canonicalHash(before?.[key] ?? null) !==
+          canonicalHash(plan.workflow[key] ?? null)
+        )
+          changes.push(key);
+      if (
+        before &&
+        canonicalHash(before.customNodes.map((node) => node.id)) !==
+          canonicalHash(plan.workflow.customNodes.map((node) => node.id))
+      )
+        changes.push("nodeOrder");
+      behavior = {
+        planVersion: current.id,
+        planHash: loaded.saved.plan_version_hash,
+        mapRevision: plan.semanticDossier!.workingDossier!.revision,
+        baseline: previous?.package_hash ?? null,
+        changes,
+        workflow: plan.workflow,
+      };
+    }
+  }
   return {
+    ...(behavior && { behavior }),
     currentPackageHash:
       loaded?.saved.invalidated_at === null
         ? loaded.saved.assembled_hash

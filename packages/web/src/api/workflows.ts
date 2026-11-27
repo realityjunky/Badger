@@ -29,6 +29,7 @@ export interface WorkflowStage {
   state: StageState;
 }
 export interface WorkflowVersion extends WorkflowFrame {
+  workflowMapping?: boolean;
   inheritedFromVersionId?: string | null;
   id: string;
   number: number;
@@ -154,6 +155,7 @@ export interface WorkflowDetail {
   capabilities: WorkflowCapabilities;
 }
 export interface WorkflowVersionDetail {
+  workflowMapping?: boolean;
   workflow: Workflow;
   version: WorkflowVersion;
   capabilities: WorkflowCapabilities;

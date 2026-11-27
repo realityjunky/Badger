@@ -118,11 +118,14 @@ export interface AuthoringDraftingJob extends Omit<
 > {
   kind: "authoring-lane" | "review-vote";
   laneId: string;
+  staged?: boolean;
   result: {
     laneOutput: import("@realityjunky/badger").AuthoringLaneOutput;
+    nodeGuidance?: import("@realityjunky/badger").AuthoringLaneOutput;
   } | null;
   review: DraftingReview<{
     laneOutput: import("@realityjunky/badger").AuthoringLaneOutput;
+    nodeGuidance?: import("@realityjunky/badger").AuthoringLaneOutput;
   }> | null;
 }
 export type AnyDraftingJob =

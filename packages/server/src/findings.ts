@@ -143,9 +143,11 @@ export async function indexFindingReports(tx: Queryable, versionId: string) {
     lane_id: string;
     revision_key: string;
     output: AuthoringLaneOutput;
+    guidance: AuthoringLaneOutput | null;
   }>(
     `select j.id,j.package_id,j.lane_id,coalesce(j.decision->>'confirmationHash',j.review_hash,j.result_hash) as revision_key,
-      coalesce(j.decision->'decision'->'laneOutput',j.review_result->'laneOutput',j.result->'laneOutput') as output
+      coalesce(j.decision->'decision'->'laneOutput',j.review_result->'laneOutput',j.result->'laneOutput') as output,
+      coalesce(j.review_result->'nodeGuidance',j.result->'nodeGuidance') as guidance
     from drafting_jobs j where j.workflow_version_id=$1 and j.lane_id is not null
       and j.status in ('submitted','accepted','cancelled','rejected') and j.result_hash is not null
       and not exists(select 1 from finding_report_versions indexed where indexed.job_id=j.id and indexed.revision_key=coalesce(j.decision->>'confirmationHash',j.review_hash,j.result_hash))
@@ -153,22 +155,29 @@ export async function indexFindingReports(tx: Queryable, versionId: string) {
     [versionId],
   );
   for (const row of rows.rows) {
-    const resultHash = canonicalHash({ laneOutput: row.output });
+    const resultHash = canonicalHash({
+      laneOutput: row.output,
+      ...(row.guidance && { nodeGuidance: row.guidance }),
+    });
     await tx.query(
       "insert into finding_report_versions values($1,$2,$3) on conflict do nothing",
       [row.id, row.revision_key, resultHash],
     );
-    const items = [
-      ...(row.output?.findings ?? []),
-      ...(row.output?.review?.findings ?? []),
-    ];
-    if (!items.length && row.output?.action)
-      items.push({
-        severity: "important",
-        problem: row.output.action.requirement,
-        fix: row.output.action.prompt,
-      });
-    for (const [ordinal, finding] of items.entries()) {
+    const items = [row.output, row.guidance].flatMap((output) => {
+      if (!output) return [];
+      const findings = [
+        ...(output.findings ?? []),
+        ...(output.review?.findings ?? []),
+      ];
+      if (!findings.length && output.action)
+        findings.push({
+          severity: "important",
+          problem: output.action.requirement,
+          fix: output.action.prompt,
+        });
+      return findings.map((finding) => ({ finding, lane: output.lane }));
+    });
+    for (const [ordinal, { finding, lane }] of items.entries()) {
       const id = canonicalHash({ job: row.id, result: resultHash, ordinal });
       await tx.query(
         "insert into finding_observations(id,workflow_version_id,job_id,package_id,lane,result_hash,ordinal,finding) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict do nothing",
@@ -177,7 +186,7 @@ export async function indexFindingReports(tx: Queryable, versionId: string) {
           versionId,
           row.id,
           row.package_id,
-          row.lane_id,
+          lane,
           resultHash,
           ordinal,
           JSON.stringify(finding),

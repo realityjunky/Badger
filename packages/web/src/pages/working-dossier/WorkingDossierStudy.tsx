@@ -119,7 +119,7 @@ export function WorkingDossierStudy({
 }: {
   dossier: Pick<
     WorkingDossierView,
-    "revision" | "content" | "pins" | "projection"
+    "revision" | "content" | "pins" | "projection" | "annotations"
   > & { prompt?: string | null };
   context: EvidenceContext;
   showPinnedHashes?: boolean;
@@ -349,6 +349,19 @@ export function WorkingDossierStudy({
         </div>
       )}
       <DossierDiagram
+        annotations={dossier.annotations}
+        evidenceFields={(ids) => {
+          const fields = ids.flatMap((id) => {
+            const field = fieldsById.get(id);
+            return field?.content ? [field] : [];
+          });
+          return fields.length ? (
+            <details>
+              <summary>{t("mapping.fileEvidence")}</summary>
+              <DossierFieldList fields={fields} context={context} />
+            </details>
+          ) : null;
+        }}
         content={content}
         selection={selected}
         highlights={highlights}

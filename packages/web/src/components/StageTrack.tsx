@@ -33,15 +33,30 @@ export const STAGE_LABELS: Readonly<Record<StageId, MessageId>> = {
 };
 
 /** The numbered stage track, with an animated marker on the active stage. */
-export function StageTrack({ stages }: { stages: readonly WorkflowStage[] }) {
+export function StageTrack({
+  stages,
+  mapped = false,
+}: {
+  stages: readonly WorkflowStage[];
+  mapped?: boolean;
+}) {
   const { t } = useI18n();
+  const visible = mapped
+    ? [
+        stages.find((entry) => entry.id === "sources"),
+        stages.find((entry) => entry.id === "source-study"),
+        stages.find((entry) => entry.id === "package"),
+        stages.find((entry) => entry.id === "evaluation"),
+        stages.find((entry) => entry.id === "review-publication"),
+      ].filter((entry): entry is WorkflowStage => !!entry)
+    : stages;
   return (
     <ol
       className="stage-track"
       aria-label={t("stage.trackLabel")}
       data-testid="stage-track"
     >
-      {stages.map(({ id, state }, index) => {
+      {visible.map(({ id, state }, index) => {
         return (
           <li
             className="stage"
@@ -52,7 +67,13 @@ export function StageTrack({ stages }: { stages: readonly WorkflowStage[] }) {
             <span className="stage-number" aria-hidden="true">
               {index + 1}
             </span>
-            <span className="stage-name">{t(STAGE_LABELS[id])}</span>
+            <span className="stage-name">
+              {t(
+                mapped && id === "source-study"
+                  ? "mapping.title"
+                  : STAGE_LABELS[id],
+              )}
+            </span>
             <StatusPill tone={PILL_TONE[state]}>
               {t(PILL_MESSAGE[state])}
             </StatusPill>

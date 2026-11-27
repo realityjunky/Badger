@@ -252,6 +252,8 @@ export async function syncWavePlanRepairs(
   await indexFindingReports(tx, versionId);
   const pkg = await readPackage(tx, versionId);
   if (!pkg) return;
+  if (pkg.authoring_plan.semanticDossier?.workingDossier?.content.contract)
+    return;
   const laneJobs = jobs.filter(
     (job) => job.package_id === pkg.id && job.lane_id,
   );

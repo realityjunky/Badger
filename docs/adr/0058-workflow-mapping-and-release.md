@@ -1,0 +1,9 @@
+# Build and review releases from one workflow map
+
+**Accepted.** Workflow mapping combines source study, executable design and Questionnaire evidence in a revision scoped to one checked pin set. Occurrences and routes have stable identities. Nodes own their decisions, approvals and guardrails. Handoffs own their exchanged artifacts. A route can declare a host event, handler and evidence field. Recording a hook describes the intended integration. Its implementation and host support require package evidence.
+
+The kernel derives the FactoryPlan from the same map used by the dashboard. A signed-in Engineer requests a build after inspecting the Plan preview. That action freezes the evidence and Plan, pins the proposal and implementation identity, and queues generation. The historical dossier and Plan tables retain immutable build inputs. Their hashes identify exactly what was used. The build is recorded as its own action. The Workflow owner reviews and approves the evaluated package and separately authorizes publication.
+
+Generation records file evidence for the script and reference lanes and renders the decision and recovery guides. One package writer supplies entry and node guidance in the same submission. A separate review job receives the staged claims and exact artifacts. Successful drafting produces a candidate for evaluation. Open requirements go to Questionnaire or the map. Implementation and verification findings retain their reviewed work records. Drafting tokens have no release or publication authority.
+
+Earlier published packages, authoring records and decisions keep their identities. The dashboard can display declared controls from an approved Plan tied to the same working revision. Adoption creates a new revision. The import first recompiles the map and compares normalized workflow protocols. Both the previous approval and the published bytes stay available in history.

@@ -67,7 +67,7 @@ export type DraftResult =
         disposition: import("@realityjunky/badger").FindingDisposition;
       }[];
     }
-  | { laneOutput: AuthoringLaneOutput }
+  | { laneOutput: AuthoringLaneOutput; nodeGuidance?: AuthoringLaneOutput }
   | {
       plan: FactoryPlan;
       resolutions?: Record<
@@ -339,7 +339,12 @@ export function validateDraftResult(
   )
     return input as DraftResult;
   if (kind === "authoring-lane" || kind === "review-vote")
-    return { laneOutput: input.laneOutput as AuthoringLaneOutput };
+    return {
+      laneOutput: input.laneOutput as AuthoringLaneOutput,
+      ...(input.nodeGuidance !== undefined && {
+        nodeGuidance: input.nodeGuidance as AuthoringLaneOutput,
+      }),
+    };
   if (kind === "draft-plan")
     return {
       plan: input.plan as FactoryPlan,

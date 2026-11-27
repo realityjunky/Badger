@@ -290,9 +290,18 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
   const page = team.expert;
   await expect(page.locator("#source-study-title")).toHaveClass("sr-only");
   const diagram = page.getByRole("region", { name: "Workflow diagram" });
-  const producer = diagram.getByRole("button", { name: dates.name });
-  const consumer = diagram.getByRole("button", { name: renderLabel });
-  const requiredCall = diagram.getByRole("button", { name: "Check dates" });
+  const producer = diagram.getByRole("button", {
+    name: dates.name,
+    exact: true,
+  });
+  const consumer = diagram.getByRole("button", {
+    name: renderLabel,
+    exact: true,
+  });
+  const requiredCall = diagram.getByRole("button", {
+    name: "Check dates",
+    exact: true,
+  });
   await expect(requiredCall).toHaveText("Check dates");
   await expect(requiredCall).toHaveAccessibleDescription("Required Skill call");
   await expect(
@@ -321,6 +330,16 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
   const detail = page.getByRole("region", { name: "Dossier details" });
   const handoff = page.getByRole("combobox", { name: "Handoff" });
   await expect(detail).toBeHidden();
+  const artifact = diagram.getByRole("button", {
+    name: `Artifact · ${dates.name} → ${renderLabel} · Documented`,
+    exact: true,
+  });
+  await expect(artifact).toHaveText("");
+  await artifact.focus();
+  await page.keyboard.press("Enter");
+  await expect(diagram.locator(".map-annotation-inspector")).toContainText(
+    "dates.json",
+  );
   await expect(
     handoff.locator("optgroup[label=Documented] option"),
   ).toHaveCount(1);

@@ -49,7 +49,15 @@ person's script declarations or acknowledge an answer on that person's behalf.
 An Agent's token scopes narrow the person's permissions. Tokens cannot save
 shared suggestion reviews or perform human sign-offs.
 
-## Follow the eight stages
+## Build from a workflow map
+
+After confirming Sources, open **Workflow mapping**. Copy the mapping prompt to study the checked pins. Inspect the typed route symbols on the map. Select **Evidence** to inspect source lines, edit a field or send its question to the Questionnaire. **Executable behavior** shows the editable contract used to compile the Plan. For a previously approved Plan, this view can import its behavior after an exact runtime-protocol comparison.
+
+Open **Build and release**, preview the compiled Plan and choose **Build candidate**. The build freezes that map revision. The generated references cover script adapters, sources, decisions and recovery. Give the package writer its dispatch prompt, then dispatch the separate package reviewer. Finished drafts are staged for evaluation. Review the behavior changes, files and evaluation before approving the candidate and publishing it. A hook icon identifies its declared event, handler and evidence.
+
+## Earlier authoring history
+
+The following stage controls describe versions with earlier authoring records and their historical dashboard links.
 
 | Stage                  | Work and completion                                                                                                                                                                               |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

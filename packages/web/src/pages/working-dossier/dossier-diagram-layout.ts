@@ -6,10 +6,10 @@ import type {
 } from "@realityjunky/badger";
 
 export const NODE_WIDTH = 132;
-const COLUMN_GAP = 56;
+const COLUMN_GAP = 146;
 const ROW_GAP = 30;
 const MARGIN = 22;
-const TRACK_GAP = 22;
+const TRACK_GAP = 32;
 
 export type EdgeKind = "interface" | "route";
 
@@ -218,7 +218,7 @@ export function layoutDossierDiagram(
   for (const group of ports.values()) {
     group.sort((first, second) => first.order - second.order);
     const span = group[0].side === "top" ? NODE_WIDTH - 36 : nodeHeight - 34;
-    const spacing = Math.min(16, span / Math.max(1, group.length - 1));
+    const spacing = Math.min(32, span / Math.max(1, group.length - 1));
     group.forEach((port, index) => {
       port.offset = (index - (group.length - 1) / 2) * spacing;
       port.spacing = spacing;
@@ -232,8 +232,13 @@ export function layoutDossierDiagram(
     const source = portPoint(start, nodeHeight);
     const target = portPoint(end, nodeHeight, 2);
     let path: string;
+    let markerPoint = {
+      x: (source.x + target.x) / 2,
+      y: (source.y + target.y) / 2,
+    };
     if (track >= 0) {
       const trackY = MARGIN + (tracks.length - 1 - track) * TRACK_GAP;
+      markerPoint = { x: (source.x + target.x) / 2, y: trackY };
       path = roundedPath([
         source,
         ...trackEntry(start, source, trackY, nodeHeight),
@@ -244,12 +249,21 @@ export function layoutDossierDiagram(
       const count = loops.get(start.node.column) ?? 1;
       const reach =
         start.node.x + NODE_WIDTH + 26 + (loop * 18) / Math.max(1, count - 1);
+      markerPoint = {
+        x: (source.x + target.x + 6 * reach) / 8,
+        y: (source.y + target.y) / 2,
+      };
       path = `M ${source.x} ${source.y} C ${reach} ${source.y} ${reach} ${target.y} ${target.x} ${target.y}`;
     } else {
       const curve = (target.x - source.x) / 2;
       path = `M ${source.x} ${source.y} C ${source.x + curve} ${source.y} ${target.x - curve} ${target.y} ${target.x} ${target.y}`;
     }
-    return { ...edge, path, hitWidth: Math.min(start.spacing, end.spacing) };
+    return {
+      ...edge,
+      path,
+      markerPoint,
+      hitWidth: Math.min(start.spacing, end.spacing),
+    };
   });
 
   const lastColumn = columns.length - 1;

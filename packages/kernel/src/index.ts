@@ -31,6 +31,7 @@ export * from "./factory/guide.js";
 export * from "./factory/questionnaire.js";
 export * from "./factory/dossier-composition.js";
 export * from "./factory/working-dossier.js";
+export * from "./factory/workflow-map.js";
 export * from "./factory/plan-composition.js";
 export * from "./factory/plan-reconciliation.js";
 export * from "./factory/plan-repair.js";

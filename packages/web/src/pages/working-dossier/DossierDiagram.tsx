@@ -1,4 +1,12 @@
-import { useId } from "react";
+import { useId, useState, type ReactNode } from "react";
+import {
+  ApiOutlined,
+  FileOutlined,
+  PauseOutlined,
+  SafetyCertificateOutlined,
+  UserSwitchOutlined,
+} from "@ant-design/icons";
+import type { MapAnnotation, MapSymbol } from "@realityjunky/badger";
 import type {
   DossierOccurrence,
   WorkingDossierContent,
@@ -25,6 +33,13 @@ const occurrenceKinds: DossierOccurrence["kind"][] = [
   "node",
   "required-skill-call",
 ];
+const symbolIcons = {
+  artifact: FileOutlined,
+  hook: ApiOutlined,
+  pause: PauseOutlined,
+  approval: UserSwitchOutlined,
+  guardrail: SafetyCertificateOutlined,
+};
 
 export function DossierDiagram({
   content,
@@ -33,7 +48,11 @@ export function DossierDiagram({
   edgeView,
   onSelect,
   inspectorId,
+  annotations,
+  evidenceFields,
 }: {
+  annotations?: Record<string, MapAnnotation[]>;
+  evidenceFields?(ids: string[]): ReactNode;
   content: WorkingDossierContent;
   selection?: DossierSelection;
   highlights: DossierHighlights;
@@ -44,6 +63,17 @@ export function DossierDiagram({
   const { t, format } = useI18n();
   const { preferences } = usePreferences();
   const marker = useId();
+  const [activeSymbol, setSymbol] = useState<MapSymbol>();
+  const selectedAnnotations = selection
+    ? annotations?.[selection.kind + "/" + selection.id]?.filter(
+        (item) => item.kind === activeSymbol,
+      )
+    : undefined;
+  const symbolKinds = new Set(
+    Object.values(annotations ?? {})
+      .flat()
+      .map((item) => item.kind),
+  );
   const edges: DiagramEdge[] = [
     ...Object.entries(content.interfaces).map(([id, edge]) => ({
       id,
@@ -156,6 +186,52 @@ export function DossierDiagram({
                   );
                 })}
               </svg>
+              {paths.map((edge) => {
+                const kinds = [
+                  ...new Set(
+                    annotations?.[edge.kind + "/" + edge.id]?.map(
+                      (item) => item.kind,
+                    ) ?? [],
+                  ),
+                ];
+                if (!kinds.length) return null;
+                return (
+                  <div
+                    className="map-edge-symbols"
+                    key={edge.kind + "/" + edge.id}
+                    style={{
+                      left: edge.markerPoint.x,
+                      top: edge.markerPoint.y,
+                    }}
+                  >
+                    {kinds.map((kind) => {
+                      const Icon = symbolIcons[kind],
+                        name = t(`mapping.${kind}`);
+                      return (
+                        <button
+                          type="button"
+                          key={kind}
+                          aria-label={name + " · " + edge.label}
+                          title={name}
+                          data-kind={kind}
+                          aria-controls={inspectorId}
+                          aria-pressed={
+                            selection?.kind === edge.kind &&
+                            selection.id === edge.id &&
+                            activeSymbol === kind
+                          }
+                          onClick={() => {
+                            setSymbol(kind);
+                            onSelect({ kind: edge.kind, id: edge.id });
+                          }}
+                        >
+                          <Icon />
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
               {nodes.map(({ id, node, x, y }) => (
                 <button
                   key={id}
@@ -184,6 +260,15 @@ export function DossierDiagram({
             </div>
           </div>
           <ul className="working-dossier-legend">
+            {[...symbolKinds].map((kind) => {
+              const Icon = symbolIcons[kind];
+              return (
+                <li key={kind}>
+                  <Icon />
+                  {t(`mapping.${kind}`)}
+                </li>
+              );
+            })}
             {occurrenceKinds
               .filter((kind) => nodes.some(({ node }) => node.kind === kind))
               .map((kind) => (
@@ -209,6 +294,27 @@ export function DossierDiagram({
               </li>
             ))}
           </ul>
+          {!!selectedAnnotations?.length && (
+            <section className="map-annotation-inspector" aria-live="polite">
+              <h4>{t(`mapping.${activeSymbol!}`)}</h4>
+              {activeSymbol === "hook" && <p>{t("mapping.hookEvidence")}</p>}
+              {selectedAnnotations.map((item, index) => (
+                <div key={index}>
+                  <strong>{item.title}</strong>
+                  {item.details.length > 0 && (
+                    <ul>
+                      {item.details.map((detail, num) => (
+                        <li key={num}>{detail}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+              {evidenceFields?.([
+                ...new Set(selectedAnnotations.flatMap((item) => item.fields)),
+              ])}
+            </section>
+          )}
         </>
       ) : (
         <p className="muted">{t("workingDossier.noOccurrences")}</p>

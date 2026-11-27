@@ -67,6 +67,11 @@ export async function handlePlan(input: AuthorizedRequest) {
       await planInputs(tx, versionId, person.id),
       value.dossierHash,
     );
+    if (inputs.dossier.workingDossier?.content.contract)
+      throw new RequestError(
+        409,
+        "Revise executable behavior in Workflow mapping.",
+      );
     const composition = composeFactoryPlan(inputs, value.plan);
     if (action === "preview") return { status: 200, value: { composition } };
     if (composition.hash !== value.confirmationHash)

@@ -40,7 +40,7 @@ export function engineerTools(
     ),
     tool(
       "save_working_dossier",
-      "Save a partial working Semantic dossier edit. Use the job's schema, current revision and pinsHash. Supply the edit inline or write it to edit.json in your working_dossier_sources folder. Keep the same editId and body for retries. On a revision conflict, read the latest job and reconcile the edit. Return the dashboard review link to the Engineer.",
+      "Save a partial workflow map with its source evidence, executable node contracts and route bindings. Use the job's schema, revision and pinsHash. Supply the edit inline or write edit.json in your working_dossier_sources folder. Reuse editId and body for retries. On conflict read the current job and reconcile your edits. Return the mapping review link.",
       {
         ...context,
         edit: z.record(z.string(), z.unknown()).optional(),

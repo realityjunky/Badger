@@ -74,8 +74,13 @@ export async function planInputs(
   personId: string,
 ): Promise<PlanCompositionInput | null> {
   const dossier = await readDossierHead(tx, versionId);
-  const approval = (await readGateConfirmations(tx, versionId, "dossier")).find(
-    (c) => c.invalidatedAt === null,
+  const approval = [
+    ...(await readGateConfirmations(tx, versionId, "workflow-build")),
+    ...(await readGateConfirmations(tx, versionId, "dossier")),
+  ].find(
+    (confirmation) =>
+      confirmation.invalidatedAt === null &&
+      confirmation.boundHashes.dossier === dossier?.hash,
   );
   if (!dossier || approval?.boundHashes.dossier !== dossier.hash) return null;
   const gate = await dossierGateState(tx, versionId, personId);
@@ -137,6 +142,7 @@ export async function storePlan(
   context: WriteContext,
   composition: PlanComposition,
   expectedVersionId: unknown,
+  mappedBuild = false,
 ) {
   if (composition.findings.length)
     throw new RequestError(
@@ -214,9 +220,16 @@ export async function storePlan(
   );
   await closeGateInbox(tx, versionId, "plan", deps.clock.now(), "gate-ready");
   // Each head is a new request for approval, even of an earlier version.
-  await notifyWorkflowRoles(tx, deps, versionId, "plan", "gate-ready", headId, [
-    "Workflow owner",
-  ]);
+  if (!mappedBuild)
+    await notifyWorkflowRoles(
+      tx,
+      deps,
+      versionId,
+      "plan",
+      "gate-ready",
+      headId,
+      ["Workflow owner"],
+    );
   await recordAudit(tx, deps, {
     actor: { personId: context.personId, credential: context.credential },
     channel: context.channel,

@@ -1,5 +1,7 @@
 import {
   applyWorkingDossierEdit,
+  workflowMapAnnotations,
+  workflowMapFromPlan,
   canonicalHash,
   createQuestionnaireHandoff,
   dossierFieldId,
@@ -21,6 +23,8 @@ import {
 } from "@realityjunky/badger";
 import { Ajv } from "ajv";
 import type { Queryable } from "./database/database.js";
+import { readPlanHead } from "./plans.js";
+import { readGateConfirmations } from "./gates.js";
 import type { ServiceDependencies } from "./dependencies.js";
 import { recordAudit, type WriteContext } from "./audit.js";
 import {
@@ -235,12 +239,51 @@ export async function readWorkingDossier(
     changes,
   );
   const reviewUrl = workingDossierReviewUrl(version.workflowId, version.id);
+  const head =
+    !content.contract && basis.revision
+      ? await readPlanHead(tx, version.id)
+      : null;
+  const historical = head?.snapshot.plan.semanticDossier?.workingDossier;
+  const sameBasis =
+    historical &&
+    historical.revision === basis.revision?.revision &&
+    historical.pinsHash === basis.pinsHash;
+  const approved =
+    sameBasis &&
+    (await readGateConfirmations(tx, version.id, "plan")).some(
+      (entry) =>
+        entry.invalidatedAt === null && entry.boundHashes.plan === head!.hash,
+    );
+  let approvedPlanSeed: WorkingDossierView["approvedPlanSeed"];
+  if (approved && head && editable) {
+    try {
+      approvedPlanSeed = {
+        hash: head.hash,
+        edit: workflowMapFromPlan(
+          content,
+          basis.pins,
+          head.snapshot.plan.workflow,
+          head.hash,
+        ),
+      };
+    } catch (error) {
+      approvedPlanSeed = {
+        hash: head.hash,
+        problem: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
   const ids = JSON.stringify({
     workflowId: version.workflowId,
     versionId: version.id,
   });
   return {
     available: basis.available,
+    annotations: workflowMapAnnotations(
+      content,
+      approved ? head!.snapshot.plan.workflow : undefined,
+    ),
+    ...(approvedPlanSeed && { approvedPlanSeed }),
     legacy: basis.legacy,
     editable,
     revision: basis.revision?.revision ?? 0,

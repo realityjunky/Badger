@@ -15,7 +15,23 @@ export function WorkflowTabs({
   const location = useLocation();
   const navigate = useNavigate();
   const requestedTab = selectedWorkflowTab(location);
-  const parentTab = requestedTab === "proposal" ? "plan" : requestedTab;
+  const mapped = items.some((item) => item.key === "mapping");
+  const parentTab =
+    mapped && ["source-study", "dossier"].includes(requestedTab)
+      ? "mapping"
+      : mapped &&
+          [
+            "plan",
+            "proposal",
+            "package",
+            "review-publication",
+            "plan-proposal",
+            "evaluation",
+          ].includes(requestedTab)
+        ? "release"
+        : requestedTab === "proposal"
+          ? "plan"
+          : requestedTab;
   const panels = [...items, linkedPanel];
   const activeTab =
     panels.find((item) => item.key === parentTab)?.key ?? items[0]?.key;

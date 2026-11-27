@@ -313,6 +313,9 @@ export async function invalidateDossierApproval(
   versionId: string,
   reason: string,
 ) {
+  await invalidateGate(tx, deps, context, versionId, "workflow-build", reason, [
+    "Engineer",
+  ]);
   await invalidateGate(tx, deps, context, versionId, "dossier", reason, [
     "Engineer",
     "Workflow owner",

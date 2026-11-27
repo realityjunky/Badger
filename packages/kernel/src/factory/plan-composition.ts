@@ -2,6 +2,7 @@ import type { FactoryPlan, SkillSourceDeclaration } from "../types.js";
 import { canonicalHash, canonicalJson } from "../util.js";
 import { normalizeWorkflow } from "../workflow/contract.js";
 import { parsePlan } from "../workflow-kernel/foundation.js";
+import { compileWorkflowMap } from "./workflow-map.js";
 import {
   validateDossierPlan,
   type QuestionnaireDiagnostic,
@@ -32,24 +33,35 @@ export function deriveFactoryPlan(input: PlanCompositionInput): FactoryPlan {
           )?.location,
         }
       : {}),
-    workflow: {
-      kind: "workflow-kernel",
-      name: dossier.workflow.name,
-      goal: dossier.workflow.goal,
-      customNodes: [...dossier.nodes]
-        .sort((a, b) => a.order - b.order)
-        .map((node) => ({
-          id: node.id,
-          label: node.id,
-          kind: "action",
-          responsibility: node.responsibility.summary,
-          implementation: { skill: "", operation: "default", scope: "main" },
-          operations: ["require", "augment", "override", "disable"],
+    workflow: dossier.workingDossier?.content.contract
+      ? compileWorkflowMap(
+          dossier.workingDossier.content,
+          dossier.workingDossier.pins,
+          dossier.workflow.name,
+          dossier.workflow.goal,
+        )
+      : {
+          kind: "workflow-kernel",
+          name: dossier.workflow.name,
+          goal: dossier.workflow.goal,
+          customNodes: [...dossier.nodes]
+            .sort((a, b) => a.order - b.order)
+            .map((node) => ({
+              id: node.id,
+              label: node.id,
+              kind: "action",
+              responsibility: node.responsibility.summary,
+              implementation: {
+                skill: "",
+                operation: "default",
+                scope: "main",
+              },
+              operations: ["require", "augment", "override", "disable"],
+              outputSchemas: [],
+              guardrails: [],
+            })),
           outputSchemas: [],
-          guardrails: [],
-        })),
-      outputSchemas: [],
-    },
+        },
   });
 }
 
@@ -94,6 +106,16 @@ export function composeFactoryPlan(
     plan,
   );
   try {
+    if (
+      input.dossier.workingDossier?.content.contract &&
+      canonicalHash(deriveFactoryPlan(input).workflow) !==
+        canonicalHash(plan.workflow)
+    )
+      findings.push({
+        path: "workflow",
+        message:
+          "Revise the executable behavior in the workflow map and rebuild its Plan.",
+      });
     parsePlan(plan, "plan version");
     const normalized = normalizeWorkflow(plan.workflow);
     const expectedIds = [...input.dossier.nodes]

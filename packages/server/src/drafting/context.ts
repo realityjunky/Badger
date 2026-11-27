@@ -125,6 +125,8 @@ export type DraftingBundle = Awaited<
     basePlan: { id: string; hash: string; plan: FactoryPlan };
   };
   authoring?: {
+    companion?: { handoff: AuthoringHandoff };
+    mapped?: boolean;
     packageId: string;
     lane: string;
     plan: AuthoringPlan;

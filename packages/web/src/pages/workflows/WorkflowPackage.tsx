@@ -29,7 +29,9 @@ export function WorkflowPackage({
   basePath,
   detail,
   onChanged,
+  mapped = false,
 }: {
+  mapped?: boolean;
   basePath: string;
   detail: WorkflowVersionDetail;
   onChanged(): void;
@@ -148,7 +150,7 @@ export function WorkflowPackage({
   );
   const packageActions = (
     <Space size="small">
-      {view?.canGenerate && detail.capabilities.generate && (
+      {!mapped && view?.canGenerate && detail.capabilities.generate && (
         <Button
           type="primary"
           disabled={busy || pending}

@@ -17,6 +17,7 @@ import { StageReviewGuidance } from "../../components/StageReviewGuidance.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 
 type LaneJob = AuthoringDraftingJob & {
+  staged?: boolean;
   createdAt: string;
   decision: {
     decision?: {
@@ -31,7 +32,7 @@ function reportResult(job: LaneJob) {
   const accepted =
     job.status === "accepted" && job.decision?.decision?.laneOutput;
   return accepted
-    ? { laneOutput: accepted }
+    ? { laneOutput: accepted, nodeGuidance: undefined }
     : (job.review?.result ?? job.result);
 }
 type StageFollowUp = {
@@ -56,6 +57,7 @@ function followUpLocation(jobId: string, followUp: StageFollowUp) {
 }
 
 type View = {
+  mapped?: boolean;
   current: boolean;
   readiness: AuthoringReadiness;
   jobs: LaneJob[];
@@ -105,6 +107,7 @@ export function WorkflowAuthoring({
     canManage &&
     view?.current &&
     !regenerationRequired &&
+    !review?.staged &&
     review?.status === "submitted";
   const canReviseSelected =
     canManage &&
@@ -212,27 +215,35 @@ export function WorkflowAuthoring({
     onChanged();
   };
   const laneRows = view
-    ? Object.values(view.readiness.lanes).map((lane) => {
-        const jobs = view.jobs
-          .filter((job) => job.laneId === lane.id)
-          .reverse();
-        const job =
-          jobs.find(({ status }) =>
-            ["queued", "claimed", "submitted"].includes(status),
-          ) ?? jobs[0];
-        const record = view.readiness.records[lane.id];
-        return {
-          ...lane,
-          job,
-          earlierJobs: jobs.filter((entry) => entry.id !== job?.id),
-          sessionRevision: record?.revision,
-          queuedRepair:
-            job?.status === "queued" &&
-            view.followUps.some(({ repairJobId }) => repairJobId === job.id),
-          repairRequirement: record?.action?.requirement,
-          bug: record?.action?.kind === "bug" ? record.action : null,
-        };
-      })
+    ? Object.values(view.readiness.lanes)
+        .filter(
+          (lane) =>
+            !view.mapped ||
+            lane.id === "workflow-entry" ||
+            lane.id === "skill-review" ||
+            view.jobs.some((job) => job.laneId === lane.id),
+        )
+        .map((lane) => {
+          const jobs = view.jobs
+            .filter((job) => job.laneId === lane.id)
+            .reverse();
+          const job =
+            jobs.find(({ status }) =>
+              ["queued", "claimed", "submitted"].includes(status),
+            ) ?? jobs[0];
+          const record = view.readiness.records[lane.id];
+          return {
+            ...lane,
+            job,
+            earlierJobs: jobs.filter((entry) => entry.id !== job?.id),
+            sessionRevision: record?.revision,
+            queuedRepair:
+              job?.status === "queued" &&
+              view.followUps.some(({ repairJobId }) => repairJobId === job.id),
+            repairRequirement: record?.action?.requirement,
+            bug: record?.action?.kind === "bug" ? record.action : null,
+          };
+        })
     : [];
   const jobStatus = (status: LaneJob["status"]) =>
     status === "submitted"
@@ -290,10 +301,10 @@ export function WorkflowAuthoring({
                 })
               }
             >
-              {t("authoring.request")}
+              {t(view.mapped ? "mapping.jobs" : "authoring.request")}
             </Button>
           )}
-          {canManage && view?.current && (
+          {canManage && view?.current && !view.mapped && (
             <Button
               type="primary"
               disabled={
@@ -320,7 +331,9 @@ export function WorkflowAuthoring({
       {regenerationRequired ? (
         <Alert type="info" showIcon title={t("authoring.regenerateHelp")} />
       ) : (
-        <p className="muted">{t("authoring.help")}</p>
+        <p className="muted">
+          {t(view?.mapped ? "mapping.handoff" : "authoring.help")}
+        </p>
       )}
       {failure && <Alert type="error" showIcon title={failure} />}
       {view && (
@@ -328,7 +341,9 @@ export function WorkflowAuthoring({
           <Tag>
             {view.readiness.status === "assembled"
               ? t("authoring.assembled")
-              : `${view.readiness.completedLanes.length}/6`}
+              : view.mapped
+                ? t("mapping.packageWork")
+                : `${view.readiness.completedLanes.length}/6`}
           </Tag>
           <Table
             className="authoring-lanes-table"
@@ -384,7 +399,17 @@ export function WorkflowAuthoring({
               ),
             }}
             columns={[
-              { title: t("package.lane"), dataIndex: "id", rowScope: "row" },
+              {
+                title: t(view.mapped ? "mapping.packageWork" : "package.lane"),
+                dataIndex: "id",
+                rowScope: "row",
+                render: (id: string) =>
+                  view.mapped && id === "workflow-entry"
+                    ? t("mapping.writer")
+                    : view.mapped && id === "skill-review"
+                      ? t("mapping.reviewer")
+                      : id,
+              },
               {
                 title: t("authoring.status"),
                 render: (_, lane) => (
@@ -422,7 +447,11 @@ export function WorkflowAuthoring({
                   return (
                     <Space orientation="vertical" size="small">
                       <Space wrap size={[4, 4]}>
-                        <Tag>{jobStatus(job.status)}</Tag>
+                        <Tag>
+                          {job.staged
+                            ? t("mapping.staged")
+                            : jobStatus(job.status)}
+                        </Tag>
                         {job.kind === "review-vote" && (
                           <span>{t("authoring.reviewVote")}</span>
                         )}
@@ -483,7 +512,7 @@ export function WorkflowAuthoring({
                               )}
                             </Button>
                           )}
-                          {canCopy && (
+                          {canCopy && !job.staged && (
                             <AgentPromptButton
                               key={job.id}
                               basePath={basePath}
@@ -686,13 +715,15 @@ export function WorkflowAuthoring({
                 </ul>
               ),
             },
-            ...(review?.result?.laneOutput.artifacts ?? []).map((artifact) => ({
-              key: artifact.path,
-              label: artifact.path,
-              children: (
-                <pre className="package-file-preview">{artifact.content}</pre>
-              ),
-            })),
+            ...(review?.result?.laneOutput.artifacts ?? [])
+              .concat(review?.result?.nodeGuidance?.artifacts ?? [])
+              .map((artifact) => ({
+                key: artifact.path,
+                label: artifact.path,
+                children: (
+                  <pre className="package-file-preview">{artifact.content}</pre>
+                ),
+              })),
             ...(review?.result?.laneOutput.review
               ? [
                   {

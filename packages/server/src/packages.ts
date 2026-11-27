@@ -71,12 +71,7 @@ export async function generationInputs(
     state.plan_version_hash === loaded.plan.hash &&
     state.proposal_hash === loaded.proposal.proposalHash &&
     approval?.id === state.proposal_confirmation_id;
-  const implementationFiles = (
-    await tx.query<{ path: string; content: string }>(
-      "select path,content from package_implementation_files where workflow_version_id=$1 order by path",
-      [versionId],
-    )
-  ).rows;
+  const implementationFiles = await buildImplementationFiles(tx, versionId);
   const implementationHash = implementationFiles.length
     ? canonicalHash(implementationFiles)
     : undefined;
@@ -88,6 +83,18 @@ export async function generationInputs(
     implementationFiles,
     implementationHash,
   };
+}
+
+export async function buildImplementationFiles(
+  tx: Queryable,
+  versionId: string,
+) {
+  return (
+    await tx.query<{ path: string; content: string }>(
+      "select path,content from package_implementation_files where workflow_version_id=$1 order by path",
+      [versionId],
+    )
+  ).rows;
 }
 
 export async function generationGateState(

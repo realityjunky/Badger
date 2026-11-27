@@ -14,6 +14,14 @@ export interface PublishedPackage {
   fileCount: number;
 }
 export interface ReviewView {
+  behavior?: {
+    planVersion: string;
+    planHash: string;
+    mapRevision: number;
+    baseline: string | null;
+    changes: string[];
+    workflow: import("@realityjunky/badger").WorkflowInput;
+  };
   currentPackageHash: string | null;
   passingReportId: string | null;
   approvalId: string | null;

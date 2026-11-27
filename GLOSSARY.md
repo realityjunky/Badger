@@ -90,7 +90,11 @@ A directory outside the Project that the host lets source locations point into, 
 _Avoid_: allowed directory
 
 **Source study**:
-The Engineer and Agent's reading of a Workflow version's pinned Skills. It starts the working dossier with Skill fields, occurrences, handoffs, and evidence from the pinned files, including executable effects that matter to the workflow.
+The historical stage for studying a Workflow version’s pinned Skills and citing their files. Current working dossiers expose this work through Workflow mapping.
+
+**Workflow mapping**:
+The revisioned map of a Workflow version's occurrences, artifact handoffs, routes and executable behavior, together with cited source evidence and reviewed Questionnaire answers. Its FactoryPlan is compiled for a build. Build and release identifies the frozen map revision, exact Plan, generated files and evaluation for a candidate.
+
 
 **Workflow version**:
 One iteration of a workflow: the Skill versions it pins, its questionnaire, and the dossier, plan, and package built from them. A new workflow version inherits the previous one's facts and resolutions with provenance to their earlier records, and its pending questionnaire work moves with them; flagged evidence stays open for re-verification, and approvals require a new review.

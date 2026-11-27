@@ -14,10 +14,12 @@ import { planGateState } from "../plans.js";
 import { generationGateState } from "../packages.js";
 import { invalidateGate } from "../gates.js";
 import { proposalGateState } from "../proposals.js";
+import { readWorkingRevision } from "../working-dossier-store.js";
 import { supersedeStaleProposalApproval } from "../proposal-invalidation.js";
+import { workflowBuildPreview, enqueueMappedBuild } from "../workflow-build.js";
 
 const GATE_PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/gates\/(sources|dossier|plan|proposal|generation|source-study\/([^/]+))(?:\/(preview|commit))?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/gates\/(sources|dossier|plan|proposal|generation|workflow-build|source-study\/([^/]+))(?:\/(preview|commit))?$/u;
 
 export function gateMethods(path: string): string | null {
   const match = GATE_PATH.exec(path);
@@ -57,7 +59,20 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     match[4] === undefined ? undefined : decodeURIComponent(match[4]);
   const gate = skillId === undefined ? match[3] : studyGateName(skillId);
   let dossierComposition: DossierComposition | undefined;
+  let mapped: Awaited<ReturnType<typeof workflowBuildPreview>> | undefined;
   const loadState = async (tx: Queryable) => {
+    if (gate === "workflow-build")
+      return (mapped = await workflowBuildPreview(
+        tx,
+        input.config,
+        versionId,
+        person.id,
+      ));
+    if (
+      ["dossier", "plan", "proposal", "generation"].includes(gate) &&
+      (await readWorkingRevision(tx, versionId))?.content.contract
+    )
+      throw new RequestError(409, "Build the candidate from the workflow map.");
     if (gate === "dossier") {
       const state = await dossierGateState(tx, versionId, person.id);
       dossierComposition = state.composition;
@@ -91,7 +106,7 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     });
   }
   if (
-    !(gate === "generation"
+    !(gate === "generation" || gate === "workflow-build"
       ? capabilities.generate
       : gate === "proposal"
         ? capabilities.approveProposal
@@ -106,15 +121,17 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     return reply.error(
       403,
       "denied",
-      gate === "generation"
-        ? "Only a signed-in Engineer or Administrator confirms generation"
-        : gate === "proposal"
-          ? "Only a signed-in Workflow owner or Administrator approves a proposal"
-          : gate === "plan"
-            ? "Only a signed-in Workflow owner or Administrator approves a plan"
-            : gate === "dossier"
-              ? "Only a signed-in Workflow owner or Administrator approves a dossier"
-              : "Only a signed-in Administrator or Engineer confirms a source or study gate",
+      gate === "workflow-build"
+        ? "Only a signed-in Engineer can build a candidate"
+        : gate === "generation"
+          ? "Only a signed-in Engineer or Administrator confirms generation"
+          : gate === "proposal"
+            ? "Only a signed-in Workflow owner or Administrator approves a proposal"
+            : gate === "plan"
+              ? "Only a signed-in Workflow owner or Administrator approves a plan"
+              : gate === "dossier"
+                ? "Only a signed-in Workflow owner or Administrator approves a dossier"
+                : "Only a signed-in Administrator or Engineer confirms a source or study gate",
     );
   const body = await readJsonBody(request);
   if (!body.ok) return reply.error(400, "invalid", body.message);
@@ -135,7 +152,10 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
         findings: state.findings,
         requestId: reply.requestId,
       });
-    return reply.json(200, { preview: state.preview });
+    return reply.json(200, {
+      preview: state.preview,
+      ...(mapped && { plan: mapped.composition?.snapshot.plan.workflow }),
+    });
   }
   if (
     Object.keys(value).some(
@@ -158,42 +178,75 @@ export async function handleGate(input: AuthorizedRequest): Promise<void> {
     gate,
     { confirmationHash: value.confirmationHash, requestId: value.requestId },
     loadState,
-    gate === "generation"
-      ? async (tx) => {
+    gate === "workflow-build"
+      ? async (tx, active) => {
+          if (
+            active.confirmationHash === value.confirmationHash &&
+            (
+              await tx.query(
+                "select 1 from workflow_jobs where generation_confirmation_id=$1 and status in ('queued','running')",
+                [active.id],
+              )
+            ).rowCount
+          )
+            return false;
           await invalidateGate(
             tx,
             dependencies,
             context,
             versionId,
-            "generation",
-            "A new explicit generation confirmation superseded the previous attempt",
+            gate,
+            "A new build superseded the previous candidate",
             ["Engineer"],
           );
           return true;
         }
-      : gate === "proposal"
-        ? (tx, active, state) =>
-            supersedeStaleProposalApproval(
+      : gate === "generation"
+        ? async (tx) => {
+            await invalidateGate(
               tx,
               dependencies,
               context,
               versionId,
-              active,
-              state,
-            )
-        : undefined,
-    gate === "dossier"
-      ? async (tx) => {
-          if (dossierComposition)
-            await storeApprovedWorkingDossier(
-              tx,
-              dependencies,
-              context,
-              versionId,
-              dossierComposition,
+              "generation",
+              "A new explicit generation confirmation superseded the previous attempt",
+              ["Engineer"],
             );
-        }
-      : undefined,
+            return true;
+          }
+        : gate === "proposal"
+          ? (tx, active, state) =>
+              supersedeStaleProposalApproval(
+                tx,
+                dependencies,
+                context,
+                versionId,
+                active,
+                state,
+              )
+          : undefined,
+    gate === "workflow-build"
+      ? (tx, confirmation) =>
+          enqueueMappedBuild(
+            tx,
+            dependencies,
+            context,
+            versionId,
+            confirmation,
+            mapped!,
+          )
+      : gate === "dossier"
+        ? async (tx) => {
+            if (dossierComposition)
+              await storeApprovedWorkingDossier(
+                tx,
+                dependencies,
+                context,
+                versionId,
+                dossierComposition,
+              );
+          }
+        : undefined,
   );
   if (result.kind === "conflict")
     return reply.error(

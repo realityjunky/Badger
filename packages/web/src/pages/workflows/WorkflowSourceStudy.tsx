@@ -10,7 +10,9 @@ import {
   Tag,
 } from "antd";
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { WorkingDossierLedger } from "../working-dossier/WorkingDossierLedger.js";
+import { MapContractEditor } from "../working-dossier/MapContractEditor.js";
 import {
   confirmStudy,
   previewStudy,
@@ -51,6 +53,9 @@ export function WorkflowSourceStudy({
 }) {
   const { t, format, locale } = useI18n();
   const { hash, search } = useLocation();
+  const navigate = useNavigate();
+  const mapped =
+    detail.workflowMapping && !new URLSearchParams(search).has("history");
   const [section, setSection] = useState<string>();
   const [factSelection, setFactSelection] = useState<{
     group?: string;
@@ -72,13 +77,16 @@ export function WorkflowSourceStudy({
   const dossierPath = workingDossierPath(detail.workflow.id, detail.version.id);
   const {
     dossier,
+    accept,
     failure: dossierFailure,
     reload,
   } = useWorkingDossier(
     basePath,
     dossierPath,
     detail.version.id,
-    selectedWorkflowTab({ hash, search }) === "source-study",
+    ["mapping", "source-study", "dossier"].includes(
+      selectedWorkflowTab({ hash, search }),
+    ),
   );
   const linkedId =
     new URLSearchParams(search).get("studyRecord") ??
@@ -393,7 +401,7 @@ export function WorkflowSourceStudy({
   );
   return (
     <WorkflowPanel
-      title={t("stage.sourceStudy")}
+      title={t(mapped ? "mapping.title" : "stage.sourceStudy")}
       hideHeading
       className="source-study-panel"
       id="source-study"
@@ -437,16 +445,97 @@ export function WorkflowSourceStudy({
           {dossier && !dossier.available && (
             <Alert type="info" title={t("workingDossier.waitForCheck")} />
           )}
-          {dossier && (dossier.available || dossier.revision > 0) && (
-            <WorkingDossierStudy
-              dossier={dossier}
-              context={{
-                basePath,
-                path: dossierPath,
-                revision: dossier.revision,
-                pins: dossier.pins,
-              }}
+          {dossier && mapped && (dossier.available || dossier.revision > 0) ? (
+            <Tabs
+              defaultActiveKey={
+                selectedWorkflowTab({ hash, search }) === "dossier"
+                  ? "evidence"
+                  : "map"
+              }
+              items={[
+                {
+                  key: "map",
+                  label: t("mapping.map"),
+                  children: (
+                    <WorkingDossierStudy
+                      dossier={dossier}
+                      context={{
+                        basePath,
+                        path: dossierPath,
+                        revision: dossier.revision,
+                        pins: dossier.pins,
+                      }}
+                    />
+                  ),
+                },
+                {
+                  key: "evidence",
+                  label: t("mapping.evidence"),
+                  children: (
+                    <WorkingDossierLedger
+                      dossier={dossier}
+                      context={{
+                        basePath,
+                        path: dossierPath,
+                        revision: dossier.revision,
+                        pins: dossier.pins,
+                      }}
+                      linkedField={new URLSearchParams(search).get(
+                        "dossierField",
+                      )}
+                      onSaved={(updated) => {
+                        accept(updated);
+                        onChanged();
+                      }}
+                      onReload={reload}
+                      onAsk={(field, handoff) => {
+                        const params = new URLSearchParams({
+                          workflow: detail.workflow.id,
+                          version: detail.version.id,
+                          askField: field.id,
+                        });
+                        if (handoff) params.set("askHandoff", handoff);
+                        navigate("/questionnaire?" + params);
+                      }}
+                    />
+                  ),
+                },
+                {
+                  key: "contract",
+                  label: t("mapping.contract"),
+                  children: (
+                    <MapContractEditor
+                      key={dossier.revision}
+                      dossier={dossier}
+                      context={{
+                        basePath,
+                        path: dossierPath,
+                        revision: dossier.revision,
+                        pins: dossier.pins,
+                      }}
+                      onSaved={(updated) => {
+                        accept(updated);
+                        onChanged();
+                      }}
+                      onReload={reload}
+                    />
+                  ),
+                },
+              ]}
             />
+          ) : (
+            dossier &&
+            (dossier.available || dossier.revision > 0) && (
+              <WorkingDossierStudy
+                dossier={dossier}
+                context={{
+                  basePath,
+                  path: dossierPath,
+                  revision: dossier.revision,
+                  pins: dossier.pins,
+                }}
+              />
+            )
           )}
           {!dossier && !dossierFailure && (
             <Spin aria-label={t("common.loading")} />

@@ -1,5 +1,6 @@
 import {
   isAuthoringJob,
+  stageMappedDraft,
   reconcileAuthoringJobs,
   validateLaneResult,
 } from "../authoring.js";
@@ -313,6 +314,10 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         job: publicDraftingJob(job),
       },
     });
+    if (job.staged && method === "POST")
+      return conflict(
+        "This draft is frozen in the release candidate. Rebuild to revise it.",
+      );
     if (method === "DELETE") {
       if (!workflowAccess.editPlan)
         throw new RequestError(
@@ -655,6 +660,11 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
                 );
       if (isAuthoringJob(updated) && updated.status === "submitted") {
         Object.assign(job, updated);
+        if (
+          action === "finish" ||
+          (action === "submit" && body.keepClaim !== true)
+        )
+          await stageMappedDraft(tx, input.config, deps, actor, updated);
         await syncRepairs();
       }
       const publicJob = publicDraftingJob(updated);
@@ -690,6 +700,15 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         "Only a signed-in person accepts or discards suggestions",
       );
     const accept = action.startsWith("accept");
+    if (
+      accept &&
+      job.context_bundle.authoring?.companion &&
+      "nodeGuidance" in (job.review_result ?? job.result ?? {})
+    )
+      throw new RequestError(
+        409,
+        "Return the package writer's draft for revision or resolve the findings in workflow mapping.",
+      );
     const planRepair = job.context_bundle.planRepair;
     const resultFields = draftResultFields(job.kind, !!planRepair);
     if (accept && planRepair) {

@@ -80,6 +80,16 @@ export function draftingJobPrompt(
       },
       [
         draftingLanguageInstructions(outputLocale),
+        ...(authoring?.companion
+          ? [
+              "You are the package writer. Use the frozen workflow map. Read the entry handoff and authoring.companion.handoff for the Node Skills. Return laneOutput for workflow-entry and nodeGuidance for skill-core, with each lane's assigned claims and inline Markdown. The generator supplied the source, adapter, decision and recovery references. Report a missing behavior as a targeted mapping question. Keep unsupported implementation or hook claims open for verification.",
+            ]
+          : []),
+        ...(authoring?.mapped && job.kind === "review-vote"
+          ? [
+              "Independently review the writer's actual entry and node artifacts in the dependency records, the compiled map and the generated references. Verify each claimed guard or host hook against the implementation and available evidence. Preserve the difference between a mapped requirement and a verified implementation.",
+            ]
+          : []),
         ...(job.context_bundle.findingWork
           ? [
               "Read findingWork in context.json for the assignment, governing requirement, original observations and acceptance example. Each observation's evidenceFiles maps its original citations to files under inputs/history/. Use the output schema for this job.",

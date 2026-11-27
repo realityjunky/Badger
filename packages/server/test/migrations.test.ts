@@ -1424,6 +1424,7 @@ describe("reviewed SQL migrations", () => {
       "0053",
       "0054",
       "0055",
+      "0056",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1486,6 +1487,7 @@ describe("reviewed SQL migrations", () => {
         "0053",
         "0054",
         "0055",
+        "0056",
       ],
       pending: [],
       drifted: [],
@@ -1528,6 +1530,7 @@ describe("reviewed SQL migrations", () => {
       "identity_sessions",
       "inbox_items",
       "inherited_answer_attachments",
+      "mapped_package_outputs",
       "notification_actions",
       "notification_bot_leases",
       "notification_channels",
@@ -1668,6 +1671,7 @@ describe("reviewed SQL migrations", () => {
         "0053",
         "0054",
         "0055",
+        "0056",
       ],
       pending: [],
       drifted: [],

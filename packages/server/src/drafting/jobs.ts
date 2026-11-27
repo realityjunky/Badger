@@ -67,6 +67,7 @@ import {
 
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
+  staged?: boolean;
   superseded_by_findings: boolean;
   id: string;
   package_id: string | null;
@@ -134,6 +135,7 @@ export function publicDraftingJob(row: DraftingJobRow) {
     }),
     packageId: row.package_id,
     laneId: row.lane_id,
+    ...(row.staged && { staged: true }),
     roundId: row.round_id,
     skillId: row.skill_id,
     skillHash:
@@ -261,7 +263,7 @@ export async function auditJob(
 export async function readDraftingJobs(tx: Queryable, versionId: string) {
   return (
     await tx.query<DraftingJobRow>(
-      "select * from drafting_jobs where workflow_version_id = $1 and deleted_at is null order by created_at, id",
+      "select j.*,exists(select 1 from mapped_package_outputs o where o.job_id=j.id and o.result_hash=coalesce(j.review_hash,j.result_hash)) as staged from drafting_jobs j where workflow_version_id = $1 and deleted_at is null order by created_at, id",
       [versionId],
     )
   ).rows;
@@ -466,6 +468,14 @@ export async function createDraftingJob(
   planRepair?: PlanRepair,
   findingWork?: import("../findings.js").FindingWorkContext,
 ) {
+  if (
+    input.kind === "draft-plan" &&
+    current.bundle.planning?.input.dossier.workingDossier?.content.contract
+  )
+    throw new RequestError(
+      409,
+      "Revise the workflow map to change compiled behavior.",
+    );
   if (input.kind === "draft-plan" && !current.bundle.planning)
     throw new RequestError(
       409,

@@ -25,6 +25,7 @@ import type { AuthorizedRequest } from "./authorized-request.js";
 import { readJsonBody } from "./body.js";
 import { readGateConfirmations } from "../gates.js";
 import { readSourceStudy } from "../source-study.js";
+import { usesWorkflowMapping } from "../working-dossier-store.js";
 import {
   parseSemanticVersion,
   updateWorkflowVersionLabel,
@@ -181,6 +182,10 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
     const workflows = await listWorkflows(database, access, person);
     const summaries = [];
     for (const workflow of workflows) {
+      const [latest] = await withVersionLabels(
+        database,
+        (await listWorkflowVersions(database, workflow.id)).slice(0, 1),
+      );
       summaries.push({
         ...workflow,
         groupName: await groupName(database, workflow.groupId),
@@ -190,13 +195,12 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
           person,
           workflow,
         ),
-        latestVersion:
-          (
-            await withVersionLabels(
-              database,
-              (await listWorkflowVersions(database, workflow.id)).slice(0, 1),
-            )
-          )[0] ?? null,
+        latestVersion: latest
+          ? {
+              ...latest,
+              workflowMapping: await usesWorkflowMapping(database, latest.id),
+            }
+          : null,
       });
     }
     const createGroups = [];
@@ -523,6 +527,7 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
           workflow,
           version,
           capabilities,
+          workflowMapping: await usesWorkflowMapping(database, version.id),
           pins: await listWorkflowPins(database, version.id),
           sourceCheck: await readSourceCheck(database, version.id),
           jobs: await listWorkflowJobs(database, version.id),

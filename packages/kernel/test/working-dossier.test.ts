@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { composeSemanticDossier } from "../src/factory/dossier-composition.js";
 import { validateSemanticDossier } from "../src/factory/questionnaire.js";
 import {
+  compileWorkflowMap,
+  workflowMapAnnotations,
+  workflowMapFromPlan,
+} from "../src/factory/workflow-map.js";
+import { normalizeWorkflow } from "../src/workflow/contract.js";
+import {
   applyWorkingDossierEdit,
   emptyWorkingDossier,
   projectWorkingDossier,
@@ -74,6 +80,134 @@ const reportContent: WorkingDossierContent = {
 };
 
 describe("working dossier readiness", () => {
+  it("compiles source bindings and distinguishes route approvals, pauses, guards, hooks and artifact handoffs", () => {
+    const content: WorkingDossierContent = {
+      ...reportContent,
+      nodes: {
+        ...reportContent.nodes,
+        final: { ...reportContent.nodes.render, label: "Archive", order: 2 },
+      },
+      fields: {
+        ...reportContent.fields,
+        "node/final/responsibility": {
+          state: "decision",
+          value: "Archive the approved report.",
+          reason: "Owner request.",
+        },
+      },
+      routes: {
+        prepare: { from: "write", to: "render", kind: "next" },
+        archive: {
+          from: "render",
+          to: "final",
+          kind: "next",
+          hooks: [
+            {
+              id: "on-record",
+              event: "before-archive",
+              handler: "record.mjs",
+              field: "node/final/responsibility",
+            },
+          ],
+        },
+      },
+      contract: {
+        nodes: {
+          write: { kind: "action", outputSchemas: [], guardrails: [] },
+          render: {
+            kind: "decision",
+            outputSchemas: [],
+            guardrails: [],
+            decision: {
+              id: "review",
+              question: "Approve report?",
+              choices: [{ id: "allow", label: "Approve", to: "final" }],
+            },
+          },
+          final: {
+            kind: "action",
+            outputSchemas: [],
+            guardrails: [
+              {
+                id: "check",
+                label: "Check the report",
+                validation: "semantic",
+              },
+            ],
+            approvalRequirements: [
+              {
+                decisionId: "review",
+                choiceId: "allow",
+                artifacts: ["report.output"],
+              },
+            ],
+          },
+        },
+        outputSchemas: [],
+      },
+    };
+    const workflow = compileWorkflowMap(
+      content,
+      [report, renderer],
+      "report",
+      "Prepare a report.",
+    );
+    expect(workflow.customNodes[1].decision?.id).toBe("review");
+    expect(workflow.customNodes[2].implementation.skill).toBe("renderer");
+    const markers = workflowMapAnnotations(content);
+    expect(
+      markers["interface/report-transfer"].map((item) => item.kind),
+    ).toEqual(["artifact"]);
+    expect(markers["route/prepare"].map((item) => item.kind)).toEqual([
+      "pause",
+    ]);
+    expect(markers["route/archive"].map((item) => item.kind)).toEqual([
+      "approval",
+      "guardrail",
+      "hook",
+    ]);
+  });
+  it("round-trips a historical Plan without changing its protocol or mutating the stored evidence", () => {
+    const pins = [report, renderer];
+    const content: WorkingDossierContent = {
+      ...reportContent,
+      routes: { handoff: { from: "write", to: "render", kind: "next" } },
+      contract: {
+        nodes: {
+          write: { kind: "action", outputSchemas: [], guardrails: [] },
+          render: { kind: "action", outputSchemas: [], guardrails: [] },
+        },
+        outputSchemas: [],
+      },
+    };
+    const workflow = compileWorkflowMap(
+      content,
+      pins,
+      "report",
+      "Prepare a report.",
+    );
+    workflow.customNodes[0].responsibility = "Produce the signed report.";
+    const seed = workflowMapFromPlan(
+      reportContent,
+      pins,
+      workflow,
+      "a".repeat(64),
+    );
+    const migrated = applyWorkingDossierEdit(reportContent, {
+      ...seed,
+      revision: 1,
+      pinsHash: "b".repeat(64),
+      editId: "adopt",
+    });
+    expect(
+      normalizeWorkflow(
+        compileWorkflowMap(migrated, pins, workflow.name, workflow.goal),
+      ).protocol,
+    ).toEqual(normalizeWorkflow(workflow).protocol);
+    expect(reportContent.fields["node/write/responsibility"].value).toBe(
+      "Prepare a report.",
+    );
+  });
   it("shows a populated source field and the named gaps of a single pinned Skill", () => {
     const hash = "a".repeat(64);
     const study = projectWorkingDossier(

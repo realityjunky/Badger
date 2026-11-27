@@ -1,4 +1,5 @@
 import { invalidateEvaluations } from "./package-invalidation.js";
+import { enqueueEvaluation } from "./evaluations.js";
 import { invalidateGate } from "./gates.js";
 import { promises as fs } from "node:fs";
 import {
@@ -16,6 +17,7 @@ import {
   authoringSessionGateway,
   buildAuthoringHandoff,
   createWorkflowKernel,
+  concernsDeferredToEvaluation,
   generateFromApprovedProposal,
   recordAuthoring,
   assemblePackage,
@@ -149,6 +151,9 @@ export async function authoringView(
   );
   const allJobs = await readDraftingJobs(tx, versionId);
   return {
+    mapped:
+      !!loaded.saved.authoring_plan.semanticDossier?.workingDossier?.content
+        .contract,
     planRepairs: allJobs
       .filter(
         (job) =>
@@ -205,7 +210,7 @@ export async function readAuthoringStageFinding(
 export function laneInput(
   loaded: Awaited<ReturnType<typeof loadAuthoring>>,
   lane: AuthoringLaneId,
-) {
+): string {
   const dependencies = loaded.saved.authoring_plan.lanes.find(
     (l) => l.id === lane,
   )!.dependencies;
@@ -213,6 +218,9 @@ export function laneInput(
     packageId: loaded.saved.id,
     authoringInputHash: loaded.state.authoring!.authoringInputHash,
     own: loaded.readiness.records[lane]?.authoredMaterialHash ?? null,
+    ...(lane === "workflow-entry" &&
+      loaded.saved.authoring_plan.semanticDossier?.workingDossier?.content
+        .contract && { nodeGuidance: laneInput(loaded, "skill-core") }),
     dependencies: dependencies.map((id) => ({
       lane: id,
       hash: loaded.readiness.records[id]?.authoredMaterialHash ?? null,
@@ -231,7 +239,8 @@ export async function reconcileAuthoringJobs(
   const active = jobs.filter(
     (j) =>
       isAuthoringJob(j) &&
-      ["queued", "claimed", "submitted"].includes(j.status),
+      ["queued", "claimed", "submitted"].includes(j.status) &&
+      !j.staged,
   );
   if (!active.length) return;
   const loaded = await loadAuthoring(tx, config, versionId);
@@ -275,6 +284,7 @@ async function boundedBundle(
   loaded: Awaited<ReturnType<typeof loadAuthoring>>,
   lane: AuthoringLaneId,
   id: string,
+  prefix = "inputs/",
 ) {
   const outputPath = path.join(loaded.root, "agent-outputs", `${id}.json`);
   const handoff = await buildAuthoringHandoff({
@@ -285,7 +295,7 @@ async function boundedBundle(
   const aliases = new Map(
     handoff.inputPaths.map((file, i) => [
       file,
-      `inputs/${i}-${path.basename(file)}`,
+      `${prefix}${i}-${path.basename(file)}`,
     ]),
   );
   const implementationHashes = new Map<string, string>();
@@ -353,7 +363,8 @@ export async function requestLaneJobs(
   tx: Queryable,
   config: ServiceConfig,
   deps: ServiceDependencies,
-  actor: DraftingActor,
+  actor:
+    DraftingActor | { personId: string; workerId: string; requestId: string },
   workflowId: string,
   versionId: string,
   repairLane?: AuthoringLaneId,
@@ -395,8 +406,34 @@ export async function requestLaneJobs(
   );
   const jobs = await readDraftingJobs(tx, versionId);
   const created: DraftingJobRow[] = [];
+  const auditDispatch = async (
+    job: DraftingJobRow,
+    action: string,
+    before: number | null,
+    reason: string | null,
+  ) => {
+    if (!("workerId" in actor))
+      return auditJob(tx, deps, actor, job, action, before, reason);
+    await recordAudit(tx, deps, {
+      actor: {
+        personId: null,
+        credential: { kind: "worker", id: actor.workerId },
+      },
+      channel: "worker",
+      action: "drafting-job." + action,
+      target: { type: "drafting-job", id: job.id },
+      before: null,
+      after: { revision: job.revision, hash: job.context_hash },
+      reason,
+      requestId: actor.requestId,
+    });
+  };
+  const mapped =
+    !!loaded.saved.authoring_plan.semanticDossier?.workingDossier?.content
+      .contract;
   for (const definition of loaded.saved.authoring_plan.lanes) {
     const lane = definition.id;
+    if (mapped && !repairLane && lane === "skill-core") continue;
     if (repairLane && lane !== repairLane) continue;
     if (!repairLane && loaded.readiness.completedLanes.includes(lane)) continue;
     const action = loaded.readiness.records[lane]?.action;
@@ -431,10 +468,7 @@ export async function requestLaneJobs(
           [activeJob.id, deps.clock.now()],
         )
       ).rows[0]!;
-      await auditJob(
-        tx,
-        deps,
-        actor,
+      await auditDispatch(
         updated,
         "cancelled",
         activeJob.revision,
@@ -444,12 +478,29 @@ export async function requestLaneJobs(
     }
     const id = deps.ids.next();
     const bundleInputs = await boundedBundle(loaded, lane, id);
+    const companion =
+      mapped && lane === "workflow-entry"
+        ? await boundedBundle(
+            loaded,
+            "skill-core",
+            id + "-nodes",
+            "inputs/nodes/",
+          )
+        : undefined;
     const { history, files } = await findingHandoff(tx, versionId, lane);
     const authoring = {
       ...bundleInputs,
       findingHistory: history,
       findingHistoryHash: canonicalHash(history),
-      files: [...bundleInputs.files, ...files],
+      ...(mapped && { mapped: true }),
+      ...(companion && { companion: { handoff: companion.handoff } }),
+      files: [
+        ...new Map(
+          [...bundleInputs.files, ...(companion?.files ?? []), ...files].map(
+            (file) => [file.path, file],
+          ),
+        ).values(),
+      ],
     };
     const context = {
       workflow: bundle.workflow,
@@ -479,6 +530,18 @@ export async function requestLaneJobs(
         },
       },
     };
+    if (companion) {
+      schema.required.push("nodeGuidance");
+      Object.assign(schema.properties, {
+        nodeGuidance: {
+          ...schema.properties.laneOutput,
+          properties: {
+            ...schema.properties.laneOutput.properties,
+            lane: { const: "skill-core" },
+          },
+        },
+      });
+    }
     const job = (
       await tx.query<DraftingJobRow>(
         `insert into drafting_jobs (id,workflow_version_id,kind,requester_id,context_bundle,context_hash,input_hash,output_schema,package_id,lane_id,created_at,updated_at)
@@ -498,14 +561,15 @@ export async function requestLaneJobs(
         ],
       )
     ).rows[0]!;
-    await auditJob(
-      tx,
-      deps,
-      actor,
+    await auditDispatch(
       job,
       "queued",
       null,
-      repairLane ? "Revise an Authoring lane report" : null,
+      repairLane
+        ? "Revise an Authoring lane report"
+        : mapped
+          ? "Prepared the next drafting job for the release candidate"
+          : null,
     );
     created.push(job);
   }
@@ -513,7 +577,26 @@ export async function requestLaneJobs(
 }
 
 export function validateLaneResult(job: DraftingJobRow, result: unknown) {
-  const output = (result as { laneOutput: AuthoringLaneOutput }).laneOutput;
+  const { laneOutput, nodeGuidance } = result as {
+    laneOutput: AuthoringLaneOutput;
+    nodeGuidance?: AuthoringLaneOutput;
+  };
+  if (job.context_bundle.authoring?.companion) {
+    if (!nodeGuidance)
+      throw new RequestError(
+        400,
+        "Include the node guidance with the entry Skill",
+      );
+    checkLaneOutput(job, nodeGuidance, "skill-core");
+  }
+  return checkLaneOutput(job, laneOutput, job.lane_id!);
+}
+
+function checkLaneOutput(
+  job: DraftingJobRow,
+  output: AuthoringLaneOutput,
+  lane: AuthoringLaneId,
+) {
   if (Buffer.byteLength(JSON.stringify(output)) > 256 * 1024)
     throw new RequestError(413, "Authoring lane output exceeds 256 KiB");
   const artifacts = Array.isArray(output.artifacts) ? output.artifacts : [];
@@ -531,7 +614,7 @@ export function validateLaneResult(job: DraftingJobRow, result: unknown) {
   const findings = validateAuthoringLaneOutput(
     output,
     authoring.plan,
-    job.lane_id!,
+    lane,
     proposal ? JSON.parse(proposal.text).workflow : undefined,
   );
   const target = output.action?.target;
@@ -604,7 +687,7 @@ async function replayAuthoring(
   });
   const accepted = (
     await tx.query<{ lane_id: AuthoringLaneId; output: AuthoringLaneOutput }>(
-      "select lane_id, output from accepted_authoring_outputs where package_id = $1 order by revision",
+      "select lane_id,output from (select lane_id,output,revision from accepted_authoring_outputs where package_id=$1 union all select lane_id,output,revision from mapped_package_outputs where package_id=$1) records order by revision",
       [loaded.saved.id],
     )
   ).rows;
@@ -870,6 +953,139 @@ export async function acceptLaneResult(
     packageId: loaded.saved.id,
     ...(followUp && { followUp }),
   };
+}
+
+export async function stageMappedDraft(
+  tx: Queryable,
+  config: ServiceConfig,
+  deps: ServiceDependencies,
+  actor: DraftingActor,
+  job: DraftingJobRow,
+) {
+  if (!job.context_bundle.authoring?.mapped || job.status !== "submitted")
+    return;
+  const result = job.review_result ?? job.result;
+  if (!result || !("laneOutput" in result)) return;
+  validateLaneResult(job, result);
+  const outputs = [
+    result.laneOutput,
+    ...(result.nodeGuidance ? [result.nodeGuidance] : []),
+  ];
+  if (
+    outputs.some(
+      (output) =>
+        (output.status !== "DONE" && !concernsDeferredToEvaluation(output)) ||
+        output.findings?.some((finding) => finding.severity !== "minor") ||
+        output.review?.findings?.some(
+          (finding) => finding.severity !== "minor",
+        ),
+    )
+  )
+    return;
+  const hash = canonicalHash(result);
+  const staged = await tx.query(
+    "select 1 from mapped_package_outputs where job_id=$1 and result_hash=$2",
+    [job.id, hash],
+  );
+  if (staged.rowCount) return;
+  const loaded = await replayAuthoring(
+    tx,
+    config,
+    deps,
+    job.workflow_version_id,
+    actor.personId,
+  );
+  if (loaded.saved.id !== job.package_id)
+    throw new RequestError(409, "The package candidate changed.");
+  for (const output of outputs) {
+    const lane = output.lane as AuthoringLaneId;
+    const record = await recordAuthoring({
+      state: loaded.state,
+      lane,
+      record: output,
+      expectedRevision: loaded.state.authoring!.revision,
+      confirmed: true,
+    });
+    await tx.query(
+      "insert into mapped_package_outputs(package_id,revision,lane_id,job_id,result_hash,output) values($1,$2,$3,$4,$5,$6::jsonb)",
+      [
+        job.package_id,
+        record.revision,
+        lane,
+        job.id,
+        hash,
+        JSON.stringify(output),
+      ],
+    );
+  }
+  const reviewed = job.kind === "review-vote";
+  if (reviewed) {
+    const findings = await findingGate(tx, job.workflow_version_id, "assembly");
+    if (findings.blockers.length)
+      throw new RequestError(
+        409,
+        "Resolve outstanding findings before assembly",
+        { blockers: findings.blockers },
+      );
+    await assemblePackage(loaded.state, true);
+  }
+  const stateHash = await commitAuthoring(
+    tx,
+    loaded.state,
+    job.workflow_version_id,
+  );
+  await tx.query(
+    "update workflow_packages set state_hash=$2,assembled_hash=$3,assembled_inventory=$4::jsonb,assembled_at=$5,package_path=$6 where id=$1",
+    [
+      loaded.saved.id,
+      stateHash,
+      loaded.state.generated!.assembledPackageHash ?? null,
+      reviewed ? JSON.stringify(loaded.state.generated!.inventory) : null,
+      reviewed ? deps.clock.now() : null,
+      path
+        .relative(loaded.root, loaded.state.generated!.packageRoot)
+        .split(path.sep)
+        .join("/"),
+    ],
+  );
+  await tx.query(
+    "update workflow_versions set revision=revision+1,updated_at=$2,stages=stages || $3::jsonb where id=$1",
+    [
+      job.workflow_version_id,
+      deps.clock.now(),
+      JSON.stringify(
+        reviewed
+          ? { package: "done", evaluation: "active" }
+          : { package: "active" },
+      ),
+    ],
+  );
+  await auditJob(
+    tx,
+    deps,
+    actor,
+    job,
+    "staged",
+    job.revision,
+    reviewed
+      ? "Assembled the reviewed release candidate"
+      : "Staged the package writer's draft for independent review",
+  );
+  await finishInbox(tx, deps, job.id);
+  if (reviewed)
+    await enqueueEvaluation(tx, config, deps, actor, job.workflow_version_id, {
+      packageHash: loaded.state.generated!.assembledPackageHash!,
+      requestId: "map-evaluation-" + job.id,
+    });
+  else
+    await requestLaneJobs(
+      tx,
+      config,
+      deps,
+      actor,
+      job.context_bundle.workflow.id,
+      job.workflow_version_id,
+    );
 }
 
 export async function assemblyPreview(

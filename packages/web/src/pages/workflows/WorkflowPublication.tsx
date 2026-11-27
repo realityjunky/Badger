@@ -14,6 +14,7 @@ import { questionnaireRequest } from "../../api/questionnaire.js";
 import { useI18n } from "../../i18n/I18nContext.js";
 import { WorkflowHostInstall } from "./WorkflowHostInstall.js";
 import { WorkflowPanel } from "./WorkflowPanel.js";
+import { SnapshotJson } from "../../components/SnapshotJson.js";
 
 export function WorkflowPublication({
   basePath,
@@ -134,6 +135,44 @@ export function WorkflowPublication({
         <Spin />
       ) : (
         <>
+          {view.behavior && (
+            <section>
+              <h3>{t("mapping.mapChanges")}</h3>
+              <p>
+                {t("mapping.revision")} {view.behavior.mapRevision} ·{" "}
+                <Link
+                  to={{
+                    search:
+                      "?planVersion=" +
+                      encodeURIComponent(view.behavior.planVersion),
+                    hash: "plan",
+                  }}
+                >
+                  {t("mapping.lastPlan")}
+                </Link>
+              </p>
+              {view.behavior.baseline && (
+                <p>
+                  {t("mapping.baseline")} <code>{view.behavior.baseline}</code>
+                </p>
+              )}
+              {view.behavior.changes.length ? (
+                <ul>
+                  {view.behavior.changes.map((item, i) => (
+                    <li key={i}>{item}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p>{t("mapping.sameBehavior")}</p>
+              )}
+              <details>
+                <summary>{t("mapping.projected")}</summary>
+                <SnapshotJson
+                  canonical={JSON.stringify(view.behavior.workflow, null, 2)}
+                />
+              </details>
+            </section>
+          )}
           {view.currentPackageHash ? (
             <p>
               {t("evaluation.hash")}{" "}
