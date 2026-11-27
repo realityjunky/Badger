@@ -245,7 +245,7 @@ body {
   position: relative;
 }
 
-.working-dossier-diagram-layout svg {
+.working-dossier-diagram-layout > svg {
   position: absolute;
   inset: 0;
 }

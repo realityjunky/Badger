@@ -92,8 +92,16 @@ export function DossierDiagram({
       label: routeLabel(content, route, t, format),
     })),
   ];
-  const nodeHeight = Math.ceil(
-    18 + 3 * 1.25 * typeScale.base * fontScaleFactor(preferences.fontScale),
+  const parallelEdges = new Map<string, number>();
+  for (const edge of edges) {
+    const endpoints = edge.from + "/" + edge.to;
+    parallelEdges.set(endpoints, (parallelEdges.get(endpoints) ?? 0) + 1);
+  }
+  const nodeHeight = Math.max(
+    Math.ceil(
+      18 + 3 * 1.25 * typeScale.base * fontScaleFactor(preferences.fontScale),
+    ),
+    34 + 30 * (Math.max(1, ...parallelEdges.values()) - 1),
   );
   const { nodes, paths, parentPaths, width, height } = layoutDossierDiagram(
     content,

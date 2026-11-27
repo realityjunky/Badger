@@ -335,6 +335,8 @@ test("the same Engineer prompt opens a dossier for single and reordered multi-Sk
     exact: true,
   });
   await expect(artifact).toHaveText("");
+  await expect(artifact.locator("svg")).toHaveCSS("position", "static");
+  await artifact.click();
   await artifact.focus();
   await page.keyboard.press("Enter");
   await expect(diagram.locator(".map-annotation-inspector")).toContainText(
