@@ -201,6 +201,9 @@ The package content whose structure and behavior are defined by the confirmed wo
 **Lane claim**:
 An evidence-backed statement that a lane has fulfilled one declared responsibility.
 
+**Authoring finding**:
+A problem a lane or review identifies in a workflow input, a package claim, or the evidence for that claim. Several lanes can observe the same problem.
+
 ## Drafting and sign-off
 
 **Drafting job**:
