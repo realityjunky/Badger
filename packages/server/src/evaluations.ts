@@ -27,6 +27,7 @@ import {
 } from "./workflow-source.js";
 import { RequestError } from "./http/errors.js";
 import { toIsoString } from "./util.js";
+import { findingSummary } from "./findings.js";
 
 export const EVALUATION_LIMITS = {
   timeLimitMilliseconds: 180_000,
@@ -126,6 +127,7 @@ export async function evaluationView(
         ? (current.passing?.id ?? null)
         : null,
     readiness: current?.publicationReadiness ?? null,
+    openFindings: await findingSummary(tx, versionId),
     reports: history.map((entry) => ({
       id: entry.id,
       jobId: entry.job_id,

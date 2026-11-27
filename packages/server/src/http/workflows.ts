@@ -116,13 +116,34 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
     }
     const values = body.value as Record<string, unknown>;
     const unknown = Object.keys(values).find(
-      (key) => !["groupId", "name", "goal", "intent", "locale"].includes(key),
+      (key) =>
+        ![
+          "groupId",
+          "name",
+          "goal",
+          "intent",
+          "locale",
+          "engineerEmail",
+        ].includes(key),
     );
     if (unknown !== undefined)
       return reply.error(400, "invalid", `Unknown field ${unknown}`);
     const frame = parseWorkflowFrame(values);
     if (!frame.ok) return reply.error(400, "invalid", frame.message);
     const groupId = values["groupId"];
+    const engineerEmail = values.engineerEmail;
+    if (
+      engineerEmail !== undefined &&
+      (typeof engineerEmail !== "string" ||
+        engineerEmail.length > 254 ||
+        (engineerEmail !== "" &&
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(engineerEmail)))
+    )
+      return reply.error(
+        400,
+        "invalid",
+        "Enter a valid Engineer email address",
+      );
     if (typeof groupId !== "string" || groupId.trim() === "")
       return reply.error(400, "invalid", "groupId must name a group");
     if (!(await mayManageGroup(database, access, person, groupId))) {
@@ -136,7 +157,11 @@ export async function handleWorkflows(input: AuthorizedRequest): Promise<void> {
       database,
       dependencies,
       context,
-      { groupId, ...frame.value },
+      {
+        groupId,
+        ...frame.value,
+        ...(typeof engineerEmail === "string" ? { engineerEmail } : {}),
+      },
       person,
     );
     if (created.kind === "missing-group")

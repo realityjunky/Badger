@@ -17,6 +17,7 @@ export interface EvaluationReport {
   report: EvalReport;
 }
 export interface EvaluationsView {
+  openFindings?: { id: string; problem: string }[];
   canEvaluate: boolean;
   currentPackageHash: string | null;
   passingReportId: string | null;

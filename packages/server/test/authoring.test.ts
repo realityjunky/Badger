@@ -1,5 +1,6 @@
 import { reportLaneOutput } from "./fixtures/authoring.js";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { afterEach, expect, it } from "vitest";
 import type { TestService } from "../src/testing/index.js";
 import {
@@ -34,6 +35,594 @@ async function generated() {
   expect((await service.worker().runOnce())?.status).toBe("succeeded");
   return fixture;
 }
+
+it("dispatches package implementation, reviews the patch, regenerates its exact bytes and verifies the finding", async () => {
+  const { call, base, approve } = await generated();
+  const { jobs: lanes } = await call(
+    base + "/package/authoring-jobs",
+    "POST",
+    { confirmed: true },
+    engineer,
+    201,
+  );
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "Finding implementation", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const jobsPath = base + "/drafting-jobs/";
+  const findingsPath = base + "/package/findings";
+  const disposition = {
+    subject: "Render the page count",
+    route: "implementation",
+    target: "implementation/page-count.mjs",
+    authority: "The reviewed export requires a page count",
+    acceptance: "A three-page fixture reports three pages",
+  };
+  const fresh = () => call(findingsPath);
+  const post = async (action: Record<string, unknown>) =>
+    call(findingsPath, "POST", {
+      ...action,
+      hash: (await fresh()).hash,
+      confirmed: true,
+      requestId: crypto.randomUUID(),
+    });
+  async function submit(
+    job: { id: string; revision: number },
+    resultFrom: (context: any) => Record<string, unknown>,
+  ) {
+    const path = jobsPath + job.id;
+    const claim = await call(
+      path + "/claim",
+      "POST",
+      { revision: job.revision },
+      engineer,
+      200,
+      secret,
+    );
+    const result = resultFrom(claim.contextBundle);
+    if ("implementation" in result) {
+      for (const forbidden of [
+        "packages/server/src/findings.ts",
+        "implementation/../packages/kernel/src/index.ts",
+        "scripts/workflow-guard.mjs",
+        "implementation/unassigned.mjs",
+      ]) {
+        await call(
+          path + "/submit",
+          "POST",
+          {
+            leaseId: claim.job.lease.id,
+            contextHash: claim.job.contextHash,
+            result: {
+              implementation: {
+                summary: "Out-of-scope change",
+                tests: "fixture",
+                changes: [
+                  { path: forbidden, previousHash: null, content: "fixture" },
+                ],
+              },
+            },
+          },
+          engineer,
+          400,
+          secret,
+        );
+      }
+    }
+    const submitted = await call(
+      path + "/submit",
+      "POST",
+      {
+        leaseId: claim.job.lease.id,
+        contextHash: claim.job.contextHash,
+        result,
+      },
+      engineer,
+      200,
+      secret,
+    );
+    return { path, result, revision: submitted.job.revision };
+  }
+  async function accept(submitted: Awaited<ReturnType<typeof submit>>) {
+    const body = { ...submitted.result, revision: submitted.revision };
+    const { preview } = await call(
+      submitted.path + "/accept-preview",
+      "POST",
+      body,
+    );
+    return call(submitted.path + "/accept", "POST", {
+      ...body,
+      confirmed: true,
+      requestId: crypto.randomUUID(),
+      confirmationHash: preview.confirmationHash,
+    });
+  }
+  for (const lane of lanes) {
+    await submit(lane, (context) => ({
+      laneOutput:
+        lane.laneId === "pause-points"
+          ? reportLaneOutput(context)
+          : {
+              schemaVersion: 2,
+              lane: lane.laneId,
+              status: "BLOCKED",
+              summary: "A package checker is missing.",
+              semanticDossierHash: context.authoring.plan.semanticDossierHash,
+              findings: [
+                {
+                  severity: "important",
+                  problem: "The page count checker has no implementation.",
+                  fix: "Add the page count checker.",
+                  evidence: [context.authoring.handoff.commonInputPath + ":1"],
+                  disposition,
+                },
+              ],
+            },
+    }));
+  }
+  const observed = await fresh();
+  expect(observed.observations).toHaveLength(2);
+  expect(observed.findings).toHaveLength(1);
+  expect(
+    (await call(base + "/drafting-jobs")).jobs.filter(
+      (job: any) => job.planRepair,
+    ),
+  ).toHaveLength(0);
+  const findingId = observed.findings[0].id;
+  await post({
+    action: "group",
+    observationIds: observed.observations.map(
+      (observation: any) => observation.id,
+    ),
+    findingId,
+    disposition,
+  });
+  const dispatch = { action: "dispatch", findingIds: [findingId] };
+  const dispatchRequest = {
+    ...dispatch,
+    confirmed: true,
+    hash: (await fresh()).hash,
+    requestId: crypto.randomUUID(),
+  };
+  const [first, retry] = await Promise.all([
+    call(findingsPath, "POST", dispatchRequest),
+    call(findingsPath, "POST", dispatchRequest),
+  ]);
+  expect(retry.jobIds).toEqual(first.jobIds);
+  const original = first.jobIds[0];
+  const regroup = {
+    action: "group",
+    findingId,
+    observationIds: observed.observations.map(
+      (observation: { id: string }) => observation.id,
+    ),
+  };
+  await post({
+    ...regroup,
+    disposition: { ...disposition, route: "badger", target: "generator" },
+  });
+  expect((await call(jobsPath + original)).job.status).toBe("cancelled");
+  await call(
+    findingsPath,
+    "POST",
+    {
+      ...dispatch,
+      confirmed: true,
+      hash: (await fresh()).hash,
+      requestId: crypto.randomUUID(),
+    },
+    engineer,
+    400,
+  );
+  await post({ ...regroup, disposition });
+  const { jobIds } = await post(dispatch);
+  expect(jobIds).not.toContain(original);
+  expect((await post(dispatch)).jobIds).toEqual(jobIds);
+  const job = (await call(jobsPath + jobIds[0])).job;
+  expect(job.kind).toBe("implement-finding");
+  const content = "export const countPages = (pages) => pages.length;\n";
+  await accept(
+    await submit(job, (context) => {
+      expect(context.findingWork.observations).toHaveLength(2);
+      const citation = context.findingWork.observations[0].evidenceFiles[0];
+      expect(context.findingWork.files).toContainEqual(
+        expect.objectContaining({ path: citation.path, hash: citation.hash }),
+      );
+      return {
+        implementation: {
+          summary: "Package page counter",
+          changes: [{ path: disposition.target, previousHash: null, content }],
+          tests: "The three-page fixture returned three.",
+        },
+      };
+    }),
+  );
+  const reviewed = await fresh();
+  const hash = createHash("sha256").update(content).digest("hex");
+  expect(reviewed.findings[0]).toMatchObject({
+    status: "awaiting-evidence",
+    subjectHash: hash,
+  });
+  expect((await post(dispatch)).jobIds).toEqual(jobIds);
+  const before = await call(base + "/package");
+  const { confirmation } = await approve("generation");
+  await call(
+    base + "/package/generate",
+    "POST",
+    {
+      confirmed: true,
+      confirmationHash: confirmation.confirmationHash,
+      stateHash: before.currentStateHash,
+      requestId: "regenerate-implementation",
+    },
+    engineer,
+    202,
+  );
+  expect((await service.worker().runOnce())?.status).toBe("succeeded");
+  const generatedPackage = await call(base + "/package");
+  expect(generatedPackage.package.files).toContainEqual(
+    expect.objectContaining({ path: disposition.target, sha256: hash }),
+  );
+  expect((await post(dispatch)).jobIds).toEqual(jobIds);
+  const { jobIds: verificationJobs } = await post({
+    ...dispatch,
+    kind: "verify-finding",
+  });
+  const verify = (await call(jobsPath + verificationJobs[0])).job;
+  await accept(
+    await submit(verify, (context) => {
+      const snapshot = context.findingWork.verificationPackage;
+      const file = snapshot.files.find(
+        (file: { path: string }) => file.path === disposition.target,
+      );
+      const candidate = Buffer.from(file.content, "base64").toString("utf8");
+      expect(candidate).toBe(content);
+      const observed = execFileSync(process.execPath, ["--input-type=module"], {
+        input:
+          candidate +
+          "\nconsole.log(countPages(['page one','page two','page three']));",
+        encoding: "utf8",
+        timeout: 5000,
+      }).trim();
+      expect(observed).toBe("3");
+      return {
+        verification: {
+          subjectHash: context.findingWork.subjectHash,
+          outcome: "passed",
+          fixture: "three synthetic pages",
+          environment: "Node " + process.versions.node,
+          evidence: "expected 3, observed " + observed,
+        },
+      };
+    }),
+  );
+  expect((await fresh()).findings[0]).toMatchObject({
+    status: "verified",
+    verified_hash: hash,
+  });
+  for (let wave = 0; wave < 3; wave++) {
+    const { jobs } = await call(
+      base + "/package/authoring-jobs",
+      "POST",
+      { confirmed: true },
+      engineer,
+      201,
+    );
+    for (const lane of jobs) {
+      await accept(
+        await submit(lane, (context) => {
+          if (lane.laneId === "script") {
+            expect(context.authoring.findingHistory).toContainEqual(
+              expect.objectContaining({ id: findingId, status: "verified" }),
+            );
+            const history = context.authoring.findingHistory.find(
+              (item: any) => item.id === findingId,
+            );
+            for (const observation of history.observations) {
+              const cited = observation.evidenceFiles[0];
+              const file = context.authoring.files.find(
+                (input: any) => input.path === cited.path,
+              );
+              expect(createHash("sha256").update(file.text).digest("hex")).toBe(
+                cited.hash,
+              );
+            }
+            expect(history.work).toContainEqual(
+              expect.objectContaining({
+                verification: expect.objectContaining({ outcome: "passed" }),
+              }),
+            );
+            expect(context.authoring.files).toContainEqual({
+              path: "inputs/package/" + disposition.target,
+              text: content,
+              hash,
+            });
+          }
+          return { laneOutput: reportLaneOutput(context) };
+        }),
+      );
+    }
+  }
+  const { preview } = await call(
+    base + "/package/assemble-preview",
+    "POST",
+    {},
+  );
+  const assembled = await call(base + "/package/assemble", "POST", {
+    confirmed: true,
+    requestId: "assemble-accepted-patch",
+    confirmationHash: preview.confirmationHash,
+  });
+  expect(assembled.packageHash).toMatch(/^[a-f0-9]{64}$/);
+  expect(
+    (
+      await call(
+        base + "/package/file?path=" + encodeURIComponent(disposition.target),
+      )
+    ).text,
+  ).toBe(content);
+  await post({
+    ...regroup,
+    disposition: { ...disposition, environment: "Node 24 offline" },
+  });
+  expect((await fresh()).findings[0].status).toBe("recheck");
+  const recheck = await post({ ...dispatch, kind: "verify-finding" });
+  expect(recheck.jobIds).not.toEqual(verificationJobs);
+}, 90000);
+
+it("keeps mixed Plan and pinned Skill work independent, then imports the reviewed Skill candidate", async () => {
+  const { base, call, skill } = await generated();
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "Mixed package findings", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const { jobs: lanes } = await call(
+    base + "/package/authoring-jobs",
+    "POST",
+    { confirmed: true },
+    engineer,
+    201,
+  );
+  const path = base + "/drafting-jobs/";
+  const findings = base + "/package/findings";
+  const planWork = {
+    route: "plan",
+    subject: "Correct the default",
+    target: "/workflow/customNodes/0/label",
+    acceptance: "Label describes the existing approved behavior",
+    authority: "Approved workflow Dossier",
+  };
+  const skillWork = {
+    route: "implementation",
+    subject: "Package Skill helper",
+    sourceSkillId: skill.id,
+    target: "scripts/pages.mjs",
+    acceptance: "Can count three pages",
+    authority: "Approved report scope",
+  };
+  const report = lanes.find((job: any) => job.laneId === "script");
+  const claim = await call(
+    path + report.id + "/claim",
+    "POST",
+    { revision: report.revision },
+    engineer,
+    200,
+    secret,
+  );
+  await call(
+    path + report.id + "/submit",
+    "POST",
+    {
+      leaseId: claim.job.lease.id,
+      contextHash: claim.job.contextHash,
+      result: {
+        laneOutput: {
+          schemaVersion: 2,
+          lane: "script",
+          status: "BLOCKED",
+          summary: "The label and helper require different changes",
+          semanticDossierHash:
+            claim.contextBundle.authoring.plan.semanticDossierHash,
+          findings: [planWork, skillWork].map((disposition) => ({
+            severity: "important",
+            problem: disposition.subject,
+            fix: disposition.acceptance,
+            disposition,
+          })),
+        },
+      },
+    },
+    engineer,
+    200,
+    secret,
+  );
+  const command = async (action: Record<string, unknown>) =>
+    call(findings, "POST", {
+      ...action,
+      hash: (await call(findings)).hash,
+      confirmed: true,
+      requestId: crypto.randomUUID(),
+    });
+  const view = await call(findings);
+  for (const observation of view.observations) {
+    await command({
+      action: "group",
+      observationIds: [observation.id],
+      findingId: observation.finding_ids[0],
+      disposition: observation.finding.disposition,
+    });
+  }
+  const dispatched = await command({
+    action: "dispatch",
+    findingIds: view.findings.map((item: any) => item.id),
+  });
+  const jobs = (await call(base + "/drafting-jobs")).jobs.filter((job: any) =>
+    dispatched.jobIds.includes(job.id),
+  );
+  const planJob = jobs.find((job: any) => job.kind === "draft-plan");
+  expect(planJob.planRepair.items.map((item: any) => item.description)).toEqual(
+    [planWork.subject],
+  );
+  const implement = jobs.find((job: any) => job.kind === "implement-finding");
+  const source = await call(
+    path + implement.id + "/claim",
+    "POST",
+    { revision: implement.revision },
+    engineer,
+    200,
+    secret,
+  );
+  expect(source.contextBundle.findingWork.sourcePin.skillId).toBe(skill.id);
+  const changed = "export const pages = items => items.length;\n";
+  const result = {
+    implementation: {
+      summary: "Add the package Skill helper",
+      tests: "Three pages returned",
+      changes: [
+        { path: skillWork.target, previousHash: null, content: changed },
+      ],
+    },
+  };
+  const { job: submitted } = await call(
+    path + implement.id + "/submit",
+    "POST",
+    {
+      result,
+      leaseId: source.job.lease.id,
+      contextHash: source.job.contextHash,
+    },
+    engineer,
+    200,
+    secret,
+  );
+  const body = { ...result, revision: submitted.revision };
+  const { preview } = await call(
+    path + implement.id + "/accept-preview",
+    "POST",
+    body,
+  );
+  await call(path + implement.id + "/accept", "POST", {
+    ...body,
+    confirmed: true,
+    requestId: "accept-source-patch",
+    confirmationHash: preview.confirmationHash,
+  });
+  const candidate = (await call(findings)).work.find(
+    (item: any) => item.id === implement.id,
+  ).source_candidate;
+  const changes = {
+    baseHash: candidate.hash,
+    changes: [
+      {
+        path: skillWork.target,
+        content: Buffer.from(changed).toString("base64"),
+      },
+    ],
+  };
+  const { preview: sourcePreview } = await call(
+    "/skills/" + skill.id + "/upload-preview",
+    "POST",
+    changes,
+  );
+  expect(sourcePreview.hash).toBe(candidate.candidateHash);
+  await call(
+    "/skills/" + skill.id + "/versions",
+    "POST",
+    {
+      ...changes,
+      confirmed: true,
+      expectedHash: sourcePreview.hash,
+      confirmationHash: sourcePreview.confirmationHash,
+    },
+    engineer,
+    201,
+  );
+  await call(base + "/pins", "POST", {
+    skillId: skill.id,
+    hash: sourcePreview.hash,
+    purpose: candidate.purpose,
+    revision: candidate.revision,
+  });
+  expect((await call(base + "/pins")).pins[0].hash).toBe(sourcePreview.hash);
+}, 45000);
+
+it("dispatches a finding about a Node's instructions to Skill Core with the originating evidence", async () => {
+  const fixture = await generated();
+  const { base, call } = fixture;
+  const { secret } = await call(
+    "/me/tokens",
+    "POST",
+    { name: "Lane revision", scopes: ["engineer"] },
+    engineer,
+    201,
+  );
+  const { jobs } = await call(
+    base + "/package/authoring-jobs",
+    "POST",
+    { confirmed: true },
+    engineer,
+    201,
+  );
+  const script = jobs.find((job: any) => job.laneId === "script");
+  await acceptLane(fixture, secret, script, reportLaneOutput);
+  const disposition = {
+    subject: "Explain the Node recovery step",
+    route: "lane",
+    target: "skill-core",
+    authority: "Approved Node responsibility",
+    acceptance: "Node instructions name the recovery input",
+  };
+  const reference = jobs.find((job: any) => job.laneId === "reference");
+  await acceptLane(fixture, secret, reference, (context) => ({
+    schemaVersion: 2,
+    lane: "reference",
+    status: "BLOCKED",
+    summary: disposition.subject,
+    semanticDossierHash: context.authoring.plan.semanticDossierHash,
+    findings: [
+      {
+        severity: "important",
+        problem: disposition.subject,
+        fix: disposition.acceptance,
+        disposition,
+        evidence: [context.authoring.handoff.commonInputPath],
+      },
+    ],
+  }));
+  const url = base + "/package/findings";
+  const view = await call(url);
+  const action = async (data: Record<string, unknown>) =>
+    call(url, "POST", {
+      ...data,
+      hash: (await call(url)).hash,
+      requestId: crypto.randomUUID(),
+      confirmed: true,
+    });
+  const { findingId } = await action({
+    action: "group",
+    observationIds: [view.observations[0].id],
+    disposition,
+  });
+  const { jobIds } = await action({
+    action: "dispatch",
+    findingIds: [findingId],
+  });
+  const { job } = await call(base + "/drafting-jobs/" + jobIds[0]);
+  expect(job).toMatchObject({ kind: "authoring-lane", laneId: "skill-core" });
+  await acceptLane(fixture, secret, job, (context) => {
+    expect(context.findingWork.findingIds).toEqual([findingId]);
+    expect(
+      context.authoring.findingHistory[0].observations[0].evidenceFiles,
+    ).toHaveLength(1);
+    return reportLaneOutput(context);
+  });
+}, 45000);
 
 /** An Agent drafts a lane result with a token; the signed-in Engineer accepts it. */
 async function acceptLane(

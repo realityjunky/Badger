@@ -6,6 +6,8 @@ import { generatePackage, type GeneratedPackage } from "./generate.js";
 import { readState, verifyApprovedProposal } from "./state.js";
 
 export interface ApprovedGenerationOptions {
+  findingLineage?: string;
+  implementationFiles?: import("../authoring/findings.js").PackageImplementationFile[];
   projectRoot: string;
   name: string;
   stateNamespace?: string;
@@ -42,6 +44,7 @@ export async function generateFromApprovedProposal(
     sourceRoots: options.sourceRoots,
   });
   const generated = await generatePackage({
+    implementationFiles: options.implementationFiles,
     proposal,
     plan,
     destination: state.draftPath,
@@ -52,7 +55,9 @@ export async function generateFromApprovedProposal(
   const updated = await initializeAuthoringSession({
     state,
     plan: await buildAuthoringPlan({ proposal, depth: options.depth }),
-    generated,
+    generated: options.findingLineage
+      ? { ...generated, findingLineage: options.findingLineage }
+      : generated,
   });
   return { state: updated, proposal, generated };
 }

@@ -423,7 +423,8 @@ export async function startTestService(
       closed = true;
       for (const instance of notificationWorkers.values())
         await instance.channels.close();
-      await server.close();
+      // Browsers may preconnect a socket without ever issuing a request.
+      await server.close({ closeConnections: true });
       await connection.release();
       await removeRoot();
     },

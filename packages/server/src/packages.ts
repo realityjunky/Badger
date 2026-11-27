@@ -21,6 +21,7 @@ import { RequestError } from "./http/errors.js";
 import { toIsoString } from "./util.js";
 
 export interface PackageRow {
+  implementation_files: import("@realityjunky/badger").PackageImplementationFile[];
   id: string;
   workflow_version_id: string;
   generation_job_id: string;
@@ -70,7 +71,23 @@ export async function generationInputs(
     state.plan_version_hash === loaded.plan.hash &&
     state.proposal_hash === loaded.proposal.proposalHash &&
     approval?.id === state.proposal_confirmation_id;
-  return { loaded, state, approval, current };
+  const implementationFiles = (
+    await tx.query<{ path: string; content: string }>(
+      "select path,content from package_implementation_files where workflow_version_id=$1 order by path",
+      [versionId],
+    )
+  ).rows;
+  const implementationHash = implementationFiles.length
+    ? canonicalHash(implementationFiles)
+    : undefined;
+  return {
+    loaded,
+    state,
+    approval,
+    current,
+    implementationFiles,
+    implementationHash,
+  };
 }
 
 export async function generationGateState(
@@ -79,7 +96,7 @@ export async function generationGateState(
   versionId: string,
   personId: string,
 ): Promise<GateState> {
-  const { loaded, state, current } = await generationInputs(
+  const { loaded, state, current, implementationHash } = await generationInputs(
     tx,
     config,
     versionId,
@@ -102,6 +119,7 @@ export async function generationGateState(
       gate: "generation",
       workflowVersionId: versionId,
       boundHashes: {
+        ...(implementationHash && { implementation: implementationHash }),
         proposal: loaded?.proposal.proposalHash ?? canonicalHash(null),
         plan: loaded?.plan.hash ?? canonicalHash(null),
         creatorState: state?.hash ?? canonicalHash(null),
@@ -199,12 +217,8 @@ export async function enqueueGeneration(
       );
     return replay;
   }
-  const { loaded, state, current, approval } = await generationInputs(
-    tx,
-    config,
-    versionId,
-    context.personId,
-  );
+  const { loaded, state, current, approval, implementationHash } =
+    await generationInputs(tx, config, versionId, context.personId);
   const confirmation = (
     await readGateConfirmations(tx, versionId, "generation")
   ).find(
@@ -220,6 +234,7 @@ export async function enqueueGeneration(
     !approval ||
     state.hash !== input.stateHash ||
     !confirmation ||
+    confirmation.boundHashes.implementation !== implementationHash ||
     confirmation.boundHashes.creatorState !== state.hash ||
     confirmation.boundHashes.proposal !== state.proposal_hash
   )

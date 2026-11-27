@@ -927,6 +927,39 @@ describe("workflow group member suggestions", () => {
 });
 
 describe("workflow input and invitations", () => {
+  it("lets the Engineer selected at creation generate, approve and publish with one account", async () => {
+    const group = await setup();
+    const result = await write("POST", "/workflows", lead, {
+      groupId: group.id,
+      ...frame,
+      engineerEmail: lead.email,
+    });
+    expect(result.status).toBe(201);
+    const { workflow } = await result.json();
+    const current = await service.request("/api/v1/workflows/" + workflow.id, {
+      as: lead,
+    });
+    expect(await current.json()).toMatchObject({
+      capabilities: {
+        generate: true,
+        approvePlan: true,
+        approveProposal: true,
+        publish: true,
+      },
+      bindings: expect.arrayContaining([
+        expect.objectContaining({
+          email: lead.email,
+          role: "Engineer",
+          pending: false,
+        }),
+        expect.objectContaining({
+          email: lead.email,
+          role: "Workflow owner",
+          pending: false,
+        }),
+      ]),
+    });
+  });
   it("assigns the creator's identity as owner even when their email is unverified", async () => {
     const group = await setup();
     const unverifiedAdministrator = { ...admin, emailVerified: false };

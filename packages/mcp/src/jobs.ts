@@ -3,7 +3,11 @@ import { constants, promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Ajv } from "ajv";
-import { canonicalHash } from "@realityjunky/badger";
+import {
+  canonicalHash,
+  verifyPackageSnapshot,
+  type PackageSnapshot,
+} from "@realityjunky/badger";
 import type { BadgerApi } from "./api.js";
 import { gitMetadata } from "./upload.js";
 import type { LocalDraftingSessions } from "./drafting-sessions.js";
@@ -17,6 +21,9 @@ interface ClaimedJob {
   id: string;
   kind:
     | "authoring-lane"
+    | "implement-finding"
+    | "verify-finding"
+    | "draft-dispositions"
     | "review-vote"
     | "draft-questions"
     | "draft-follow-ups"
@@ -134,6 +141,11 @@ export async function claimJob(
     job: ClaimedJob;
     contextBundle: {
       authoring?: { files: { path: string; text: string; hash: string }[] };
+      findingWork?: {
+        verificationPackage?: PackageSnapshot;
+        files: { path: string; text: string; hash: string }[];
+        packageFiles: { path: string; content: string; hash: string }[];
+      };
       pins: {
         skillId: string;
         hash: string;
@@ -193,7 +205,34 @@ export async function claimJob(
         bytes,
       );
     }
-    for (const file of claimed.contextBundle.authoring?.files ?? []) {
+    const snapshot = claimed.contextBundle.findingWork?.verificationPackage;
+    if (snapshot) {
+      for (const file of verifyPackageSnapshot(snapshot).files) {
+        await writePrivateSourceFile(
+          path.join(folder, "package", safePath(file.path)),
+          Buffer.from(file.content, "base64"),
+        );
+      }
+    }
+    for (const file of snapshot
+      ? []
+      : (claimed.contextBundle.findingWork?.packageFiles ?? [])) {
+      const relative = safePath(file.path);
+      if (
+        !relative.startsWith("implementation/") ||
+        createHash("sha256").update(file.content).digest("hex") !== file.hash
+      )
+        throw new Error(
+          "The package implementation file differs from its assignment",
+        );
+      await writePrivateSourceFile(
+        path.join(folder, "package", relative),
+        Buffer.from(file.content),
+      );
+    }
+    for (const file of claimed.contextBundle.authoring?.files ??
+      claimed.contextBundle.findingWork?.files ??
+      []) {
       const relative = safePath(file.path);
       if (
         !relative.startsWith("inputs/") ||
@@ -377,7 +416,12 @@ export async function finishJob(
         requiresPerson: response.job.status === "submitted",
         dashboardUrl:
           response.job.kind === "authoring-lane" ||
-          response.job.kind === "review-vote"
+          response.job.kind === "review-vote" ||
+          [
+            "implement-finding",
+            "verify-finding",
+            "draft-dispositions",
+          ].includes(response.job.kind)
             ? `${api.url}/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}#package`
             : response.job.kind === "draft-plan"
               ? `${api.url}/workflows/${encodeURIComponent(input.workflowId)}/versions/${encodeURIComponent(input.versionId)}#plan`

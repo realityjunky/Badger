@@ -1,4 +1,5 @@
 export * from "./types.js";
+export * from "./authoring/findings.js";
 export * from "./skill/find.js";
 export * from "./workflow/contract.js";
 export { isWorkflowName } from "./workflow/name.js";

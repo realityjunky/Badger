@@ -1,4 +1,5 @@
 import { InfoCircleOutlined } from "@ant-design/icons";
+import { OpenPackageFindings } from "../../components/OpenPackageFindings.js";
 import {
   Alert,
   Button,
@@ -311,6 +312,21 @@ export function WorkflowPlan({
       data-testid="workflow-plan"
       aria-labelledby="plan-title"
     >
+      {detail.capabilities.generate && (
+        <OpenPackageFindings items={view?.openFindings} workflowPath={path} />
+      )}
+      {!!view?.attestationReferences?.length && (
+        <details>
+          <summary>{t("finding.attestationAdvisory")}</summary>
+          <ul>
+            {view.attestationReferences.map((item, index) => (
+              <li key={index}>
+                <code>{item.node}</code> · {item.text}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
       <div className="proposal-toolbar">
         <StageReviewGuidance stage="plan-proposal" />
         <Space size={2}>

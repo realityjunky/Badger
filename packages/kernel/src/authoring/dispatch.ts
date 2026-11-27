@@ -7,6 +7,8 @@ import { atomicWrite, isWithin, sha256, slug, stableValue } from "../util.js";
 import { inspectProtectedProjectPath } from "../engine/protected-project-path.js";
 import { atomicWriteContainedText } from "../engine/contained-atomic-write.js";
 import { deriveAuthoringPlan } from "./plan.js";
+import { packageImplementationPath } from "./findings.js";
+import { localFindingHandoff } from "./finding-history.js";
 import { readState } from "../factory/state.js";
 import {
   AUTHORING_INPUT_LIMIT_BYTES,
@@ -498,6 +500,9 @@ export async function buildAuthoringHandoff(
     ),
   ];
   const packageInputPaths = [
+    ...(options.state.generated.implementationFiles ?? []).map((file) =>
+      path.join(packageRoot, packageImplementationPath(file.path)),
+    ),
     path.join(packageRoot, "reference", "authoring-lanes.json"),
     path.join(packageRoot, "reference", "composition-report.md"),
     ...(options.lane === "script"
@@ -586,11 +591,13 @@ export async function buildAuthoringHandoff(
         }))
       : undefined;
   const handoffInputPaths = [commonPath, proposalPath, ...inputPaths];
+  const findingHistory = await localFindingHandoff(options.state, options.lane);
   const commonContent =
     JSON.stringify(
       {
         schemaVersion: 1,
         kind: "authoring-common-input",
+        ...(findingHistory.length && { findingHistory }),
         ...(semanticDossier ? { semanticDossier } : {}),
         workflow: plan.name,
         lane: options.lane,

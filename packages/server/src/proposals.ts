@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
+import { findingSummary } from "./findings.js";
 import path from "node:path";
 import { buildProposal } from "@realityjunky/badger";
 import type { ServiceConfig } from "./config.js";
@@ -136,6 +137,7 @@ export async function proposalView(
   const confirmations = await readGateConfirmations(tx, versionId, "proposal");
   return {
     planVersionHash: loaded?.plan.hash ?? null,
+    openFindings: await findingSummary(tx, versionId),
     proposal: proposal
       ? {
           name: proposal.name,

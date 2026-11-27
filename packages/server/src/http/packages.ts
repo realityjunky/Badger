@@ -1,5 +1,6 @@
 import { authoringLaneIds, type AuthoringLaneId } from "@realityjunky/badger";
 import { publicDraftingJob } from "../drafting/jobs.js";
+import { readFindings, findingCommand } from "../findings.js";
 import {
   authoringView,
   readAuthoringStageFinding,
@@ -21,9 +22,10 @@ import { readJsonBody } from "./body.js";
 import { fields } from "../questionnaire/model.js";
 
 const PATH =
-  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/package(?:\/(generate|file|authoring|authoring-jobs|assemble-preview|assemble))?$/u;
+  /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/package(?:\/(generate|file|authoring|authoring-jobs|findings|assemble-preview|assemble))?$/u;
 export function packageMethods(path: string): string | null {
   const match = PATH.exec(path);
+  if (match?.[3] === "findings") return "GET, HEAD, POST";
   return match
     ? ["generate", "authoring-jobs", "assemble-preview", "assemble"].includes(
         match[3] ?? "",
@@ -44,6 +46,11 @@ export async function handlePackage(input: AuthorizedRequest) {
     versionId = decodeURIComponent(version);
   let generation: GenerationInput | undefined;
   let authoringInput: Record<string, unknown> = {};
+  if (action === "findings" && input.method === "POST") {
+    const parsed = await readJsonBody(input.request);
+    if (!parsed.ok) throw new RequestError(400, parsed.message);
+    authoringInput = objectInput(parsed.value);
+  }
   if (
     ["authoring-jobs", "assemble-preview", "assemble"].includes(action ?? "")
   ) {
@@ -99,6 +106,23 @@ export async function handlePackage(input: AuthorizedRequest) {
       const caps = await workflowCapabilities(tx, access, person, record);
       if (!caps.read)
         throw new RequestError(403, "This workflow is outside your roles");
+      if (action === "findings") {
+        if (!caps.generate)
+          throw new RequestError(
+            403,
+            "Only a signed-in workflow Engineer reviews package findings",
+          );
+        if (input.method !== "POST") return readFindings(tx, versionId);
+        return findingCommand(
+          tx,
+          input.dependencies,
+          { ...input.context, agentHost: null },
+          workflowId,
+          versionId,
+          authoringInput,
+          config,
+        );
+      }
       if (
         [
           "authoring",

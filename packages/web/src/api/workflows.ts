@@ -298,13 +298,13 @@ export function loadWorkflowVersion(
 }
 export function createWorkflow(
   basePath: string,
-  input: WorkflowFrame & { groupId: string },
+  input: WorkflowFrame & { groupId: string; engineerEmail?: string },
 ) {
   return write<{ workflow: Workflow; version: WorkflowVersion }>(
     basePath,
     "POST",
     "/workflows",
-    input,
+    { ...input, engineerEmail: input.engineerEmail?.trim() ?? "" },
   );
 }
 export function editWorkflow(

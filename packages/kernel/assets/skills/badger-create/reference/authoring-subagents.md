@@ -33,9 +33,11 @@ For dossier-backed sessions, use the handoff's `semanticDossier.path` and `/sema
 
 Keep claims, artifacts, and status in separate lane envelopes, whether workers run concurrently or one main Agent applies all three lenses. Workers write only their designated output files. They cannot execute supplied Skills, write Creator or authoring state, or modify generated package files. The coordinator validates and records output, then the assembler applies declared content leaves. The file handoff describes these permissions; the host must enforce worker tool access.
 
-Wave 1 `NEEDS_CONTEXT` outputs require an `action` with `kind: "question"`, a targeted `prompt`, and `requirement` identifying an existing dossier field with a JSON pointer such as `/topics/recoveryPolicy`. Explain the missing or ambiguous detail in the summary. The main session asks that question, obtains confirmation of the repaired dossier, regenerates the session, and reauthors invalidated lanes. Resolved facts remain authoritative.
+Use `schemaVersion: 2` to report independent findings. Give each a `disposition` with its subject, route, target, authority and acceptance example. Use a previous `findingId` for a continuing problem. Cite files in the bounded handoff. A Plan edit names its field or insertion point. An implementation names a file or directory under the package's `implementation/` or within a pinned Skill identified by `sourceSkillId`. A lane revision names its owning claim or leaf. Report a defect in Badger using the `badger` route. Skill Library uploader attestations are advisory. An additional workflow prerequisite needs its own approved authority.
 
-Wave 1 `BLOCKED` outputs require an `action`, a concrete `requirement`, and a
+In a legacy Wave 1 envelope, `NEEDS_CONTEXT` requires an `action` with `kind: "question"`, a targeted `prompt`, and `requirement` identifying an existing dossier field with a JSON pointer such as `/topics/recoveryPolicy`. Explain the missing or ambiguous detail in the summary.
+
+Legacy Wave 1 `BLOCKED` outputs require an `action`, a concrete `requirement`, and a
 `prompt` explaining the next action. Use a repair with a stage target for a
 workflow input and a repair without a target for lane-local work. For a defect
 or missing capability owned by Badger, use `kind: "bug"` and identify the

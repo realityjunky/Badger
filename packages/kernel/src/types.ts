@@ -79,6 +79,9 @@ export interface Guardrail {
   id: string;
   label: string;
   validation: ValidationKind;
+  prerequisite?:
+    | { factId: string; statement: string }
+    | { platformRule: "verification.verifierPin" | "approvalRequirements" };
   verification?: WorkflowVerificationRequirement;
 }
 
@@ -1284,6 +1287,8 @@ export interface CreatorState {
   candidates: SkillCandidate[];
   confirmedProposal?: FactoryProposal;
   generated?: {
+    findingLineage?: string;
+    implementationFiles?: import("./authoring/findings.js").PackageImplementationFile[];
     packageRoot: string;
     protocolPath: string;
     evalPath: string;

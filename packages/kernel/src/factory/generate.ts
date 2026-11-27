@@ -2,6 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringify } from "yaml";
+import {
+  packageImplementationPath,
+  validatePackageImplementationFiles,
+  type PackageImplementationFile,
+} from "../authoring/findings.js";
 import type {
   FactoryPlan,
   FactoryProposal,
@@ -57,6 +62,8 @@ function nodeSkillName(workflow: string, node: string): string {
 const WORKFLOW_RUNTIME_CERTIFICATION_TASK = "workflow-runtime-certification";
 
 export interface GeneratedPackage {
+  findingLineage?: string;
+  implementationFiles?: PackageImplementationFile[];
   packageRoot: string;
   protocolPath: string;
   evalPath: string;
@@ -874,6 +881,7 @@ function scaffoldAuthoredPaths(proposal: FactoryProposal): string[] {
 }
 
 async function writeScaffold(options: {
+  implementationFiles?: readonly PackageImplementationFile[];
   proposal: FactoryProposal;
   plan: FactoryPlan;
   root: string;
@@ -1053,6 +1061,11 @@ async function writeScaffold(options: {
     path.join(root, "scripts", "badger-hook-guard.mjs"),
     badgerHookGuardScript(),
   );
+  validatePackageImplementationFiles(options.implementationFiles ?? []);
+  for (const file of options.implementationFiles ?? []) {
+    const relative = packageImplementationPath(file.path);
+    await atomicWrite(path.join(root, relative), file.content);
+  }
   await writePackageInventory(
     root,
     "scaffold",
@@ -1080,6 +1093,7 @@ async function writeScaffold(options: {
 }
 
 export async function generatePackage(options: {
+  implementationFiles?: PackageImplementationFile[];
   proposal: FactoryProposal;
   plan: FactoryPlan;
   destination: string;
@@ -1128,6 +1142,7 @@ export async function generatePackage(options: {
   let moved = false;
   try {
     const scaffold = await writeScaffold({
+      implementationFiles: options.implementationFiles,
       proposal,
       plan: options.plan,
       root: stagingRoot,
@@ -1146,6 +1161,9 @@ export async function generatePackage(options: {
     moved = true;
     return {
       packageRoot: root,
+      ...(options.implementationFiles?.length && {
+        implementationFiles: options.implementationFiles,
+      }),
       protocolPath: path.join(root, "reference", "workflow-protocol.json"),
       evalPath: path.join(root, "badger", "eval.yaml"),
       authoringPlanPath: scaffold.authoringPlanPath.replace(stagingRoot, root),

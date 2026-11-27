@@ -14,6 +14,10 @@ import {
   projectWorkflowState,
 } from "../src/workflow-runtime/index.js";
 import { createWorkflowRuntime } from "../src/workflow-runtime/public.js";
+import {
+  bindFindingVerifier,
+  verifyFindingReceipt,
+} from "../src/authoring/finding-verification.js";
 import { normalizeWorkflow } from "../src/workflow/contract.js";
 import { generatePackage } from "../src/factory/generate.js";
 import { readRunState } from "../src/engine/state.js";
@@ -517,9 +521,33 @@ describe("Workflow Verification Receipt contract", () => {
         verification: { ...proposal, verifierSignature: signature },
       });
       expect(advanced.currentNode).toBe("finish");
-      expect(
-        (await runtime.recover(runRoot)).verificationReceipts,
-      ).toHaveLength(1);
+      const receipts = (await runtime.recover(runRoot)).verificationReceipts!;
+      expect(receipts).toHaveLength(1);
+      const stored = await readWorkflowVerificationReceipt(
+        runRoot,
+        receipts[0].receiptHash,
+        profile,
+      );
+      const binding = await bindFindingVerifier(value, {
+        nodeId: "check",
+        requirementId: "verified",
+      });
+      expect(verifyFindingReceipt(binding, hash, stored)).toBe(
+        receipts[0].receiptHash,
+      );
+      expect(() =>
+        verifyFindingReceipt(binding, "f".repeat(64), stored),
+      ).toThrow(/target digest/);
+      expect(() => verifyFindingReceipt(binding, pin.sha256, stored)).toThrow(
+        /target digest/,
+      );
+      expect(() =>
+        verifyFindingReceipt(
+          { ...binding, role: "different-check" },
+          hash,
+          stored,
+        ),
+      ).toThrow(/approved check/);
     });
 
     it("requires and durably projects a passed receipt", async () => {

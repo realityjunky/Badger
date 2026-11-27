@@ -3,6 +3,35 @@ import { createHash } from "node:crypto";
 import { composeFactoryPlan, deriveFactoryPlan } from "../src/index.js";
 import { questionnaireFixture } from "./fixtures/semantic-dossier.js";
 
+it("requires confirmed workflow authority for a mandatory prerequisite", () => {
+  const { dossier, factoryPlan } = questionnaireFixture();
+  factoryPlan.semanticDossier = dossier;
+  const input = {
+    workflowVersionId: "example",
+    dossierHash: "b".repeat(64),
+    dossier,
+    skillSources: factoryPlan.skillSources,
+  };
+  const fact = dossier.confirmedUserFacts[0]!;
+  const rule = {
+    id: "approved-prerequisite",
+    label: "Review before proceeding",
+    validation: "semantic" as const,
+    prerequisite: { factId: fact.id, statement: fact.statement },
+  };
+  factoryPlan.workflow.customNodes[0]!.guardrails.push(rule);
+  expect(composeFactoryPlan(input, factoryPlan).findings).toEqual([]);
+  rule.prerequisite = {
+    factId: "SCRIPT_EFFECTS_PENDING",
+    statement: "Uploader attestation pending",
+  };
+  expect(composeFactoryPlan(input, factoryPlan).findings).toContainEqual(
+    expect.objectContaining({
+      path: expect.stringContaining("approved-prerequisite.prerequisite"),
+    }),
+  );
+});
+
 it("derives the plan frame, ordered Node identities, and exact source declarations from the approved meaning", () => {
   const { dossier } = questionnaireFixture();
   dossier.nodes.unshift({

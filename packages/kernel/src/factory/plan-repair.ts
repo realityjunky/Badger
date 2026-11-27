@@ -24,6 +24,7 @@ export interface PlanRepair {
   wave: AuthoringWaveId;
   basePlan: { id: string; hash: string; plan: FactoryPlan };
   reports: PlanRepairReport[];
+  selectedItems?: { id: string; source: string; description: string }[];
   recovery?: {
     draftIds: string[];
     startingPlan: FactoryPlan;
@@ -36,16 +37,17 @@ export interface PlanRepairResolution {
 }
 export function planRepairItems(repair: PlanRepair) {
   return [
-    ...repair.reports.flatMap((report) =>
-      (report.findings.length
-        ? report.findings.map((finding) => finding.problem)
-        : [report.action.requirement]
-      ).map((description, index) => ({
-        id: report.jobId + "/" + index,
-        source: report.lane,
-        description,
-      })),
-    ),
+    ...(repair.selectedItems ??
+      repair.reports.flatMap((report) =>
+        (report.findings.length
+          ? report.findings.map((finding) => finding.problem)
+          : [report.action.requirement]
+        ).map((description, index) => ({
+          id: report.jobId + "/" + index,
+          source: report.lane,
+          description,
+        })),
+      )),
     ...(repair.recovery?.conflicts ?? []).map((conflict) => ({
       id: conflict.draftId + conflict.path,
       source: "reconciliation",

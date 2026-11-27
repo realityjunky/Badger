@@ -1,6 +1,6 @@
 # Resolve Authoring findings across package generations
 
-**Proposed.** One Engineer maintains the Skills and workflow, dispatches Agent jobs, and personally approves the Plan, proposal and package, including publication. Field experts answer domain questions when the Engineer needs their input. Give an Authoring finding an identity within a Workflow version and route work by the artifact or check that must change. The six lanes own the claims and authored leaves defined by the Authoring protocol.
+**Accepted.** One Engineer maintains the Skills and workflow, dispatches Agent jobs, and personally approves the Plan, proposal and package, including publication. Field experts answer domain questions when the Engineer needs their input. Give an Authoring finding an identity within a Workflow version and route work by the artifact or check that must change. The six lanes own the claims and authored leaves defined by the Authoring protocol.
 
 ADR 0053 gives a lane report one follow-up target. ADR 0056 combines Plan follow-ups from a finished wave. A single report can identify both a Plan error and missing code in a Skill. Today the Plan Agent can record that evidence is missing, the Engineer can accept that Plan, and the next generation can send the same two problems back to Plan. Information about the first repair exists in job history, outside the next lane's input. [Stage follow-ups](0053-authoring-stage-follow-ups.md) · [Wave Plan repairs](0056-wave-plan-repairs.md)
 
@@ -8,4 +8,4 @@ The dashboard presents one Engineer. For new workflows, creation assigns that pe
 
 Submitted reports contribute draft observations. The Engineer can group them and dispatch Plan edits, implementation and checks in one operation. Each job names its work and expected result. Claims about a checking program can use its automatically calculated file fingerprint once the program exists. An explicitly required signed result also uses the trusted verifier's public key. Each colleague's installation supplies its own observations when it runs the check. The kernel evaluates the evidence against the originating claim. [Verifier receipts](0054-workflow-approval-requirements-and-verifier-pins.md)
 
-The companion design specifies dashboard operations, Drafting job inputs and outputs, verification, compatibility, and an end-to-end acceptance case. [Authoring finding resolution](../authoring-finding-resolution.md)
+Implementation jobs return file changes for the reviewed scope in the workflow package. Badger records platform defects separately. The companion design specifies dashboard operations, Drafting job inputs and outputs, verification, compatibility, and an end-to-end acceptance case. [Authoring finding resolution](../authoring-finding-resolution.md)

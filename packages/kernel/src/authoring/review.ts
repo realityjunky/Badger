@@ -104,6 +104,8 @@ function normalizeFinding(
 ): AuthoringReviewFinding {
   return {
     severity: finding.severity,
+    ...(finding.disposition && { disposition: finding.disposition }),
+    ...(finding.evidence && { evidence: [...finding.evidence] }),
     ...(finding.path ? { path: finding.path } : {}),
     ...(finding.claim ? { claim: finding.claim } : {}),
     problem: finding.problem,

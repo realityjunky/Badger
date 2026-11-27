@@ -58,9 +58,16 @@ import { readPromptTemplate } from "../prompt-templates.js";
 import { saveDraftingReview, validateDraftingSubmission } from "./reviews.js";
 import { workingDossierBasis } from "../working-dossier.js";
 import type { PlanReconciliation } from "./plan-reconciliation.js";
+import {
+  acceptFindingResult,
+  validateFindingResult,
+  findingAssignmentCurrent,
+  readFindings,
+} from "../findings.js";
 
 export type DraftingActor = WriteContext & { agentHost: string | null };
 export interface DraftingJobRow {
+  superseded_by_findings: boolean;
   id: string;
   package_id: string | null;
   lane_id: AuthoringLaneId | null;
@@ -118,6 +125,13 @@ export function publicDraftingJob(row: DraftingJobRow) {
     id: row.id,
     workflowVersionId: row.workflow_version_id,
     kind: row.kind,
+    ...(row.context_bundle.findingWork && {
+      findingWork: {
+        findingIds: row.context_bundle.findingWork.findingIds,
+        subjectHash: row.context_bundle.findingWork.subjectHash,
+      },
+      feedback: row.repair_feedback,
+    }),
     packageId: row.package_id,
     laneId: row.lane_id,
     roundId: row.round_id,
@@ -200,7 +214,11 @@ export function publicDraftingJob(row: DraftingJobRow) {
 }
 
 export function isQuestionnaireDraftingJob(job: DraftingJobRow) {
-  return job.kind !== "draft-plan" && !isAuthoringJob(job);
+  return (
+    !job.context_bundle.findingWork &&
+    job.kind !== "draft-plan" &&
+    !isAuthoringJob(job)
+  );
 }
 
 export function draftingTarget(job: DraftingJobRow): DraftingTarget {
@@ -294,7 +312,8 @@ async function openDraftingInbox(
       job.workflow_version_id,
       job.id,
       deps.clock.now(),
-      isAuthoringJob(job)
+      isAuthoringJob(job) ||
+      (job.context_bundle.findingWork && job.kind !== "draft-plan")
         ? "package"
         : job.kind === "draft-plan"
           ? "plan"
@@ -321,6 +340,13 @@ export async function reconcileDraftingJobs(
     actor.personId,
   );
   const jobs = await readDraftingJobs(tx, versionId);
+  const findingView = jobs.some(
+    (job) =>
+      job.context_bundle.findingWork &&
+      ["queued", "claimed", "submitted"].includes(job.status),
+  )
+    ? await readFindings(tx, versionId)
+    : null;
   for (const job of jobs) {
     const followUp =
       job.kind === "draft-plan" &&
@@ -377,8 +403,21 @@ export async function reconcileDraftingJobs(
         : job.input_hash;
     const changed =
       legacy ||
+      Boolean(
+        job.context_bundle.findingWork &&
+        job.kind === "draft-plan" &&
+        (job.context_bundle.planning?.basePlanVersionId !==
+          inputs.planning?.basePlanVersionId ||
+          inputHash !== draftingInputHash(inputs, target)),
+      ) ||
+      Boolean(
+        job.context_bundle.findingWork &&
+        findingView &&
+        !findingAssignmentCurrent(job, findingView),
+      ) ||
       ((!job.reconciliationHeadId || !!job.context_bundle.planRepair) &&
         !isAuthoringJob(job) &&
+        !job.context_bundle.findingWork &&
         inputHash !== draftingInputHash(inputs, target));
     const expired =
       job.status === "claimed" &&
@@ -425,6 +464,7 @@ export async function createDraftingJob(
   input: DraftingTarget,
   current: Awaited<ReturnType<typeof draftingContext>>,
   planRepair?: PlanRepair,
+  findingWork?: import("../findings.js").FindingWorkContext,
 ) {
   if (input.kind === "draft-plan" && !current.bundle.planning)
     throw new RequestError(
@@ -472,6 +512,7 @@ export async function createDraftingJob(
     );
   const bundle = {
     ...current.bundle,
+    ...(findingWork && { findingWork }),
     ...(planRepair && { planRepair }),
     promptTemplate: await readPromptTemplate(tx, input.kind),
   };
@@ -499,7 +540,7 @@ export async function createDraftingJob(
         input.skillId,
         input.questionId,
         input.locale,
-        draftingInputHash(current.bundle, input),
+        draftingInputHash(bundle, input),
       ],
     )
   ).rows[0]!;
@@ -706,6 +747,8 @@ export async function jobDecisionPreview(
   }
   if (action === "accept" && isAuthoringJob(job))
     validateLaneResult(job, decision);
+  if (action === "accept" && job.context_bundle.findingWork)
+    validateFindingResult(job, decision as DraftResult);
   if (action === "accept" && job.kind === "import-open-questions")
     await refuseImportedAgain(
       tx,
@@ -769,6 +812,16 @@ export async function decideDraftingJob(
       ? await acceptLaneResult(tx, config, deps, actor, job, preview.decision)
       : null;
   const questionIds: string[] = [];
+  if (preview.action === "accept" && job.context_bundle.findingWork)
+    await acceptFindingResult(
+      tx,
+      deps,
+      actor,
+      job,
+      preview.decision as DraftResult,
+      blobs,
+      config,
+    );
   let planVersionId: string | null = null;
   if (preview.action === "accept" && "plan" in preview.decision) {
     const planning = job.context_bundle.planning!;

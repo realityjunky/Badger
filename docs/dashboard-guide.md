@@ -163,6 +163,21 @@ receives the findings with its current inputs. The Engineer's acceptance can
 assign minor concerns to named Evaluation checks when the authoring evidence
 is complete. Those checks must pass before package review.
 
+In **Package → Findings**, select observations and choose **Review grouping**. A
+single observation can support several findings. Choose the target, governing
+requirement and an example that should pass. **Dispatch ready work** creates the
+job and its copyable prompt. Select a pinned Skill to change that package source,
+or use a package-relative file or directory below `implementation/`. Use
+**Report Badger defect** for a problem in the platform.
+
+**Review result** shows the proposed patch and test evidence. Accept a package
+file change and regenerate to include it in the scaffold and assembled package.
+For a Skill change, **Adopt Skill version** previews the edited version and
+replaces the workflow pin after confirmation. **Verify adopted changes** sends
+the checked target to an Agent. Signed checks use the verifier binding in the
+approved protocol. If an earlier wave already has a queued Plan repair, use
+**Use individual finding assignments** to supersede that repair and keep its history.
+
 Open **Authoring plan** to check each lane's wave and dependencies. **Package**
 shows the latest generated package for the selected Workflow version. Each
 version can have one current package. Regeneration keeps the earlier package
@@ -247,7 +262,7 @@ corrections, and review history.
 | A decision preview becomes stale              | A review or its inputs changed. Generate a fresh preview and inspect it before confirming.                                                      |
 | A Chinese interface shows English suggestions | Check the version locale and job's requested output language. Stored draft text is not automatically translated.                                |
 | The effect tab has no items                   | The version may contain no inventoried scripts, or the Agent may have supplied only facts. Missing required coverage remains pending.           |
-| Source study cannot finish                    | Confirm Sources, resolve the study findings, and complete any current uploader declaration review.                                              |
+| Source study cannot finish                    | Confirm Sources and resolve the study findings. The uploader's Skill Library attestation is optional.                                           |
 | An Agent cannot claim a copied prompt         | Read the current job and report stale revisions, changed inputs, expired credentials, or denied access. Do not silently substitute another job. |
 
 ## Further reading

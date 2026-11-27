@@ -22,6 +22,7 @@ import { recordAudit, type WriteContext } from "./audit.js";
 import type { GateConfirmation } from "./gates.js";
 import { publicKernelMessage } from "./proposals.js";
 import { notifyWorkflowRoles } from "./inbox.js";
+import { findingGate } from "./findings.js";
 
 interface ReviewRow {
   id: string;
@@ -139,6 +140,8 @@ export async function reviewGateState(
       ? reviewState({ ...loaded.state, review: undefined }, loaded.readiness)
       : loaded.publicationReadiness;
   const blockers = [...readiness.blockers];
+  const outstanding = await findingGate(tx, versionId, "review");
+  blockers.push(...outstanding.blockers);
   if (loaded.saved.invalidated_at !== null || !loaded.saved.assembled_hash)
     blockers.push(
       "Assemble the current approved package before review or publication",
@@ -150,6 +153,7 @@ export async function reviewGateState(
       gate: action,
       workflowVersionId: versionId,
       boundHashes: {
+        ...(outstanding.hash && { findings: outstanding.hash }),
         package: loaded.saved.assembled_hash ?? canonicalHash(null),
         generation: loaded.saved.id,
         creatorState: loaded.persisted.hash,

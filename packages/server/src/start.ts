@@ -5,7 +5,7 @@ import { createService, type ServiceOptions } from "./http/service.js";
 export interface StartedServer {
   url: string;
   port: number;
-  close(): Promise<void>;
+  close(options?: { closeConnections: boolean }): Promise<void>;
 }
 
 function urlHost(host: string): string {
@@ -51,10 +51,11 @@ export async function startHttpServer(
   return {
     url: `http://${urlHost(options.config.host)}:${port}`,
     port,
-    close: () => {
+    close: (options) => {
       service.close();
       return new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
+        if (options?.closeConnections) server.closeAllConnections();
       });
     },
   };

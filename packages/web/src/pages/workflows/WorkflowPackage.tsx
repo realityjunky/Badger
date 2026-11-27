@@ -1,4 +1,5 @@
 import { WorkflowAuthoring } from "./WorkflowAuthoring.js";
+import { WorkflowFindings } from "./WorkflowFindings.js";
 import { EllipsisOutlined } from "@ant-design/icons";
 import {
   Alert,
@@ -49,6 +50,10 @@ export function WorkflowPackage({
   const [file, setFile] = useState<{ path: string; text: string } | null>(null);
   const [fileFilter, setFileFilter] = useState("");
   const [activeTab, setActiveTab] = useState<string>();
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("packageTab") === "findings")
+      setActiveTab("findings");
+  }, [location.search, location.key]);
   const path = `/workflows/${encodeURIComponent(detail.workflow.id)}/versions/${encodeURIComponent(detail.version.id)}`;
   useEffect(() => {
     const controller = new AbortController();
@@ -178,6 +183,22 @@ export function WorkflowPackage({
           />
         ),
       },
+      ...(detail.capabilities.generate
+        ? [
+            {
+              key: "findings",
+              label: t("finding.title"),
+              children: (
+                <WorkflowFindings
+                  key={saved.id + "-" + refresh}
+                  basePath={basePath}
+                  path={path}
+                  onChanged={onChanged}
+                />
+              ),
+            },
+          ]
+        : []),
       {
         key: "plan",
         label: t("package.authoringPlan"),

@@ -17,6 +17,8 @@ export interface PlanVersion {
   createdAt: string;
 }
 export interface PlanView {
+  attestationReferences?: { node: string; text: string }[];
+  openFindings?: { id: string; problem: string }[];
   versions: PlanVersion[];
   dossierHash: string | null;
   skeleton: FactoryPlan | null;

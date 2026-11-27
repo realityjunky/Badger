@@ -2,6 +2,7 @@ import {
   composeFactoryPlan,
   canonicalHash,
   deriveFactoryPlan,
+  legacyAttestationReferences,
   type PlanComposition,
   type PlanCompositionInput,
   type PlanSnapshot,
@@ -23,6 +24,7 @@ import { listWorkflowPins } from "./workflow-source.js";
 import { RequestError } from "./http/errors.js";
 import { toIsoString } from "./util.js";
 import { invalidateProposal } from "./proposal-invalidation.js";
+import { findingSummary } from "./findings.js";
 
 interface PlanRow {
   id: string;
@@ -239,6 +241,10 @@ export async function planView(
   const head = await readPlanHead(tx, versionId);
   const confirmations = await readGateConfirmations(tx, versionId, "plan");
   return {
+    openFindings: await findingSummary(tx, versionId),
+    attestationReferences: head
+      ? legacyAttestationReferences(head.snapshot.plan)
+      : [],
     versions: (await readPlanVersions(tx, versionId)).map(
       publicAuthoringVersion,
     ),

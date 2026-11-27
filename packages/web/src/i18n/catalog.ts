@@ -186,6 +186,14 @@ const en = {
 
   "package.filterFiles": "Filter package files",
   "package.title": "Package",
+  "finding.engineer": "Workflow engineer",
+  "finding.creator": "Defaults to you",
+  "finding.title": "Findings",
+  "finding.attestationAdvisory":
+    "Plan references to Skill Library reviews · uploader attestations are optional",
+  "finding.grantApproval":
+    "Give this Engineer workflow approval and publication permissions",
+  "finding.assignEngineer": "Assign as workflow engineer",
   "package.description":
     "Generate the scaffold from the approved proposal, then author its declared leaves. Every file keeps its owner and content hash.",
   "package.generate": "Generate package",
@@ -1988,6 +1996,12 @@ const zh: Record<MessageId, string> = {
 
   "package.filterFiles": "筛选软件包文件",
   "package.title": "软件包",
+  "finding.engineer": "工作流工程师",
+  "finding.creator": "默认由你负责",
+  "finding.title": "待解决问题",
+  "finding.attestationAdvisory": "计划中提及的技能库审核 · 上传者证明为可选项",
+  "finding.grantApproval": "授予该工程师工作流审批与发布权限",
+  "finding.assignEngineer": "设为工作流工程师",
   "package.description":
     "从已批准的提案生成骨架，然后创作声明的内容叶。每个文件均保留其所有者和内容哈希。",
   "package.generate": "生成软件包",

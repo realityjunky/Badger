@@ -61,6 +61,28 @@ export interface PlanSnapshot {
   plan: FactoryPlan;
 }
 
+/** Surface legacy prose for human review without changing the stored Plan or its approval. */
+export function legacyAttestationReferences(plan: FactoryPlan) {
+  const references: { node: string; text: string }[] = [];
+  for (const node of plan.workflow.customNodes) {
+    const text = [
+      node.responsibility,
+      ...node.guardrails
+        .filter((rule) => !rule.prerequisite)
+        .map((rule) => rule.label),
+    ];
+    for (const statement of text) {
+      if (
+        /SCRIPT_EFFECTS_PENDING|uploader.{0,40}attest|script.effect.{0,35}(review|approv)|上传者.{0,20}(确认|审核)|脚本.{0,12}(影响|效果).{0,12}(审核|批准)/iu.test(
+          statement,
+        )
+      )
+        references.push({ node: node.id, text: statement });
+    }
+  }
+  return references;
+}
+
 /** Preview incomplete edits too; only a candidate without findings may be stored. */
 export function composeFactoryPlan(
   input: PlanCompositionInput,
@@ -90,6 +112,31 @@ export function composeFactoryPlan(
     for (const node of normalized.protocol.nodes.filter(
       (node) => !node.disabled,
     )) {
+      for (const rule of node.guardrails) {
+        if (rule.prerequisite === undefined) continue;
+        const authority = rule.prerequisite;
+        const supported =
+          authority &&
+          typeof authority === "object" &&
+          ("platformRule" in authority
+            ? Object.keys(authority).length === 1 &&
+              ((authority.platformRule === "verification.verifierPin" &&
+                !!rule.verification?.verifierPin) ||
+                (authority.platformRule === "approvalRequirements" &&
+                  !!node.approvalRequirements?.length))
+            : input.dossier.confirmedUserFacts.some(
+                (fact) =>
+                  fact.id === authority.factId &&
+                  fact.statement === authority.statement,
+              ));
+        if (!supported) {
+          findings.push({
+            path: `workflow.customNodes.${node.id}.guardrails.${rule.id}.prerequisite`,
+            message:
+              "A mandatory workflow prerequisite must cite the exact confirmed Dossier fact or the applicable verifier or approval requirement on this Node. Skill Library review status is advisory.",
+          });
+        }
+      }
       for (const [role, bindings] of [
         ["implementation", [node.implementation]],
         ["requiredSkillCalls", node.requiredSkillCalls],

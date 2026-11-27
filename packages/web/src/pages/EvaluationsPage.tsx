@@ -30,6 +30,7 @@ import { PageHeader } from "../components/PageHeader.js";
 import { StageReviewGuidance } from "../components/StageReviewGuidance.js";
 import { useLiveUpdates } from "../live/LiveUpdatesContext.js";
 import { ReloadRecordsButton } from "../components/ReloadRecordsButton.js";
+import { OpenPackageFindings } from "../components/OpenPackageFindings.js";
 import { useI18n } from "../i18n/I18nContext.js";
 import { useDemoMode } from "../app/DemoContext.js";
 import { workflowVersionLabel } from "../util/workflowVersion.js";
@@ -251,6 +252,12 @@ export function EvaluationsPage() {
               <h2 id="evaluation-current-title">
                 {t("evaluation.currentPackage")}
               </h2>
+              {route && detail?.capabilities.generate && (
+                <OpenPackageFindings
+                  items={view.openFindings}
+                  workflowPath={route.slice(0, -"/evaluations".length)}
+                />
+              )}
               {view.canEvaluate && (
                 <Button
                   type="primary"

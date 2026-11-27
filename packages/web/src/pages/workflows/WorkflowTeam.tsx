@@ -142,12 +142,18 @@ export function WorkflowTeam({
       key: "roles",
       render: (_, member) => (
         <Space size={[4, 4]} wrap>
-          {member.bindings.map((binding) => (
-            <Tag key={binding.id}>
-              {t(ROLE_MESSAGES[binding.role])}
-              {binding.pending && ` · ${t("workflow.invited")}`}
-            </Tag>
-          ))}
+          {member.bindings
+            .filter(
+              (binding) =>
+                binding.role !== "Workflow owner" ||
+                !member.bindings.some((role) => role.role === "Engineer"),
+            )
+            .map((binding) => (
+              <Tag key={binding.id}>
+                {t(ROLE_MESSAGES[binding.role])}
+                {binding.pending && ` · ${t("workflow.invited")}`}
+              </Tag>
+            ))}
         </Space>
       ),
     },
@@ -158,6 +164,39 @@ export function WorkflowTeam({
             key: "actions",
             render: (_: unknown, member: WorkflowTeamMember) => (
               <Space size={[4, 4]} wrap>
+                {member.bindings.some(
+                  (binding) => binding.role === "Engineer",
+                ) &&
+                  !member.bindings.some(
+                    (binding) => binding.role === "Workflow owner",
+                  ) && (
+                    <Popconfirm
+                      title={t("finding.grantApproval")}
+                      onConfirm={() =>
+                        assign({ email: member.email, role: "Workflow owner" })
+                      }
+                      okText={t("workflow.assign")}
+                      cancelText={t("workflow.cancel")}
+                    >
+                      <Button size="small" disabled={busy}>
+                        {t("finding.grantApproval")}
+                      </Button>
+                    </Popconfirm>
+                  )}
+                {!engineerAssigned &&
+                  member.bindings.some(
+                    (binding) => binding.role === "Workflow owner",
+                  ) && (
+                    <Button
+                      size="small"
+                      disabled={busy}
+                      onClick={() =>
+                        assign({ email: member.email, role: "Engineer" })
+                      }
+                    >
+                      {t("finding.assignEngineer")}
+                    </Button>
+                  )}
                 <Button
                   size="small"
                   disabled={busy}

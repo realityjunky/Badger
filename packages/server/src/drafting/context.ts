@@ -113,6 +113,7 @@ export type DraftingBundle = Awaited<
   ReturnType<typeof draftingContext>
 >["bundle"] & {
   promptTemplate?: PromptTemplateSnapshot;
+  findingWork?: import("../findings.js").FindingWorkContext;
   planRepair?: import("@realityjunky/badger").PlanRepair;
   authoringFollowUp?: {
     jobId: string;
@@ -197,6 +198,10 @@ export function draftingInputs(bundle: DraftingBundle, target: DraftingTarget) {
     return [...heads.values()].sort((a, b) => compare(a.personId, b.personId));
   };
   switch (target.kind) {
+    case "implement-finding":
+    case "verify-finding":
+    case "draft-dispositions":
+      return bundle.findingWork?.basisHash;
     case "authoring-lane":
     case "review-vote":
       return bundle.authoring;

@@ -1,5 +1,7 @@
 import {
   authoringLaneWave,
+  readyPlanFinding,
+  planFindingTargetHash,
   canonicalHash,
   reconcilePlanDraft,
   type PlanRepair,
@@ -12,6 +14,7 @@ import type { ServiceDependencies } from "../dependencies.js";
 import { RequestError } from "../http/errors.js";
 import { readPackage } from "../packages.js";
 import { readPlanHead } from "../plans.js";
+import { indexFindingReports } from "../findings.js";
 import type { draftingContext } from "./context.js";
 import {
   auditJob,
@@ -41,6 +44,28 @@ function laneReport(job: DraftingJobRow): PlanRepairReport | undefined {
   const output =
     accepted?.decision?.laneOutput ??
     (result && "laneOutput" in result ? result.laneOutput : undefined);
+  if (output?.schemaVersion === 2) {
+    const findings = output.findings ?? [];
+    if (
+      !job.lane_id ||
+      !["BLOCKED", "DONE_WITH_CONCERNS"].includes(output.status) ||
+      !findings.length ||
+      !findings.every(readyPlanFinding)
+    )
+      return;
+    return {
+      jobId: job.id,
+      lane: job.lane_id,
+      resultHash: canonicalHash({ laneOutput: output }),
+      findings,
+      action: {
+        kind: "repair",
+        target: { stage: "plan" },
+        requirement: findings.map((item) => item.problem).join("\n"),
+        prompt: findings.map((item) => item.fix).join("\n"),
+      },
+    };
+  }
   if (
     !output ||
     !job.lane_id ||
@@ -89,6 +114,7 @@ async function enqueue(
     .reverse()
     .find((job) => job.context_bundle.planRepair?.basisHash === basisHash);
   if (prior && prior.status !== "cancelled") return prior;
+  if (prior?.superseded_by_findings && !explicit) return;
   const busy = jobs.find((job) => job.context_bundle.planRepair && active(job));
   if (busy) {
     if (explicit)
@@ -223,6 +249,7 @@ export async function syncWavePlanRepairs(
   jobs: DraftingJobRow[],
 ) {
   if (!current.bundle.planning || !jobs.some((job) => job.lane_id)) return;
+  await indexFindingReports(tx, versionId);
   const pkg = await readPackage(tx, versionId);
   if (!pkg) return;
   const laneJobs = jobs.filter(
@@ -246,6 +273,30 @@ export async function syncWavePlanRepairs(
         job.context_bundle.planRepair.wave === wave,
     );
     const running = previous.find(active);
+    // Explicitly grouped work has its own observation, finding and Plan revision fences.
+    if (
+      running?.context_bundle.findingWork ||
+      previous.some(
+        (job) =>
+          job.superseded_by_findings ||
+          (job.context_bundle.findingWork && job.status === "accepted"),
+      )
+    )
+      continue;
+    if (
+      !previous.length &&
+      members.some((job) => {
+        const result = job?.review_result ?? job?.result;
+        if (!result || !("laneOutput" in result)) return false;
+        const output = result.laneOutput;
+        return (
+          (output.schemaVersion === 2 &&
+            output.findings?.some((f) => !readyPlanFinding(f))) ||
+          ((output.findings?.length ?? 0) > 1 && output.schemaVersion !== 2)
+        );
+      })
+    )
+      continue;
     if (running) running.waveReportsOpen = !completed;
     if (
       running &&
@@ -281,6 +332,48 @@ export async function syncWavePlanRepairs(
       continue;
     const head = await readPlanHead(tx, versionId);
     if (head?.hash !== pkg.plan_version_hash) break;
+    const priorItems = new Set<string>();
+    for (const job of jobs) {
+      const repair = job.context_bundle.planRepair;
+      if (!repair || job.status !== "accepted" || repair.packageId === pkg.id)
+        continue;
+      for (const report of repair.reports) {
+        for (const finding of report.findings) {
+          if (!readyPlanFinding(finding)) continue;
+          const target = finding.disposition!.target;
+          priorItems.add(
+            canonicalHash({
+              disposition: finding.disposition,
+              fix: finding.fix,
+              field: planFindingTargetHash(repair.basePlan.plan, target),
+            }),
+          );
+        }
+      }
+    }
+    // A fresh package alone supplies no new Plan inputs. Its observations remain available in Findings.
+    if (
+      reports.some((report) =>
+        report.findings.some((finding) => {
+          if (!readyPlanFinding(finding)) return false;
+          const field = planFindingTargetHash(
+            head.snapshot.plan,
+            finding.disposition!.target,
+          );
+          return (
+            !field ||
+            priorItems.has(
+              canonicalHash({
+                disposition: finding.disposition,
+                fix: finding.fix,
+                field,
+              }),
+            )
+          );
+        }),
+      )
+    )
+      continue;
     const source = [...previous]
       .reverse()
       .find(

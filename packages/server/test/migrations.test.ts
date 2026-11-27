@@ -101,7 +101,11 @@ describe("reviewed SQL migrations", () => {
       )
     ).rows[0]!;
     const { lease_kind, lease_activity_at, deleted_at, ...original } = after;
-    expect(original).toEqual({ ...before, repair_feedback: null });
+    expect(original).toEqual({
+      ...before,
+      repair_feedback: null,
+      superseded_by_findings: false,
+    });
     expect(deleted_at).toBeNull();
     expect(lease_kind).toBe("agent");
     expect(new Date(lease_activity_at as string).getTime()).toBe(
@@ -236,7 +240,11 @@ describe("reviewed SQL migrations", () => {
       deleted_at,
       ...original
     } = after;
-    expect(original).toEqual({ ...before, repair_feedback: null });
+    expect(original).toEqual({
+      ...before,
+      repair_feedback: null,
+      superseded_by_findings: false,
+    });
     expect(deleted_at).toBeNull();
     expect([lease_kind, lease_activity_at]).toEqual([null, null]);
     expect([
@@ -1415,6 +1423,7 @@ describe("reviewed SQL migrations", () => {
       "0052",
       "0053",
       "0054",
+      "0055",
     ]);
 
     const state = await applyMigrations(test.database, migrations, clock);
@@ -1476,6 +1485,7 @@ describe("reviewed SQL migrations", () => {
         "0052",
         "0053",
         "0054",
+        "0055",
       ],
       pending: [],
       drifted: [],
@@ -1492,6 +1502,7 @@ describe("reviewed SQL migrations", () => {
       "answer_revisions",
       "attachment_blob_cleanup",
       "audit_events",
+      "authoring_findings",
       "authoring_follow_ups",
       "comment_revisions",
       "concern_resolutions",
@@ -1505,6 +1516,13 @@ describe("reviewed SQL migrations", () => {
       "evaluation_reports",
       "fact_acknowledgements",
       "fact_answer_revisions",
+      "finding_events",
+      "finding_observation_links",
+      "finding_observations",
+      "finding_report_versions",
+      "finding_requests",
+      "finding_work",
+      "finding_work_links",
       "gate_confirmations",
       "groups",
       "identity_sessions",
@@ -1518,6 +1536,7 @@ describe("reviewed SQL migrations", () => {
       "notification_robots",
       "oidc_transactions",
       "package_assembly_requests",
+      "package_implementation_files",
       "package_reviews",
       "pending_plan_repairs",
       "people",
@@ -1648,6 +1667,7 @@ describe("reviewed SQL migrations", () => {
         "0052",
         "0053",
         "0054",
+        "0055",
       ],
       pending: [],
       drifted: [],

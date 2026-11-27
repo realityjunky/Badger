@@ -202,6 +202,28 @@ With permission, call save_answer with the current revisions and the answer type
     output: "Proposed review findings and vote",
     body: "Read the accepted lane outputs, assembled package, approved dossier and plan, and kernel review handoff. Compare responsibilities, interfaces, contracts, provenance, exact accepted dependency hashes and cross-lane consistency. Record specific findings and blockers in the kernel review schema, citing the affected records or artifact locations and explaining the mismatch. Distinguish missing evidence from a demonstrated failure and preserve approved meaning. Check the whole review result, write its narrative fields in outputLocale, and submit the proposed vote. A person separately accepts the review; an Agent vote is not package approval or publication.",
   },
+  ...(
+    ["implement-finding", "verify-finding", "draft-dispositions"] as const
+  ).map((id) => ({
+    id,
+    stage: "package" as const,
+    scenario: "agent-draft" as const,
+    audience: ["Engineer"],
+    title:
+      id === "implement-finding"
+        ? "Implement a package finding"
+        : id === "verify-finding"
+          ? "Verify a package finding"
+          : "Group authoring observations",
+    dependencies: ["Reviewed finding scope and immutable source evidence"],
+    output: "A schema-bound draft for the Engineer",
+    body:
+      id === "implement-finding"
+        ? "Implement the reviewed finding for the workflow package. Work on the supplied package sources in the private job workspace. Return the bounded package-relative file changes and concrete test evidence. The Engineer reviews and adopts them. A Badger platform defect belongs in a separate report."
+        : id === "verify-finding"
+          ? "Exercise the specified acceptance example on the identified package bytes in the authorized test environment. Report the actual outcome, tool versions, checked digest and evidence. Report missing prerequisites honestly."
+          : "Group observations by the artifact and behavior that must change. Preserve every observation and its citations. Propose independent package implementation, verification and actionable Plan edits. Report Badger platform defects separately. The Engineer reviews the grouping.",
+  })),
 ];
 
 const reviews: [PromptTemplate["stage"], string, string, string[], string][] = [

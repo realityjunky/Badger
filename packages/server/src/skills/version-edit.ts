@@ -86,7 +86,7 @@ export async function inspectVersionUpload(
   };
 }
 
-async function applyFileChanges(
+export async function applyFileChanges(
   blobs: BlobStore,
   base: SkillVersion,
   edits: Map<string, Buffer | null>,

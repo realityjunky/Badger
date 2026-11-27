@@ -230,6 +230,7 @@ export type AuthoringReviewLens = (typeof AUTHORING_REVIEW_LENSES)[number];
 export type AuthoringReviewFindingSource = "provider" | "deterministic";
 
 export interface AuthoringLaneFinding {
+  disposition?: import("./findings.js").FindingDisposition;
   severity: AuthoringFindingSeverity;
   path?: string;
   claim?: string;
@@ -368,6 +369,7 @@ export interface AuthoringLaneAction {
 }
 
 export interface AuthoringLaneOutput {
+  schemaVersion?: 1 | 2;
   lane: string;
   status: AuthoringLaneOutputStatus;
   dispatchMode?: string;
@@ -464,7 +466,7 @@ export interface AuthoringReviewResult {
 }
 
 export interface AuthoringRecord {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   kind: "authoring-record";
   revision?: number;
   workflow: string;
@@ -489,6 +491,7 @@ export interface AuthoringRecord {
 }
 
 export interface AuthoringRecordInput {
+  schemaVersion?: 1 | 2;
   lane?: AuthoringLaneId;
   status: AuthoringStatus;
   claims?: AuthoringClaimEvidence[];

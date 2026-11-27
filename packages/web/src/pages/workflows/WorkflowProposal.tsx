@@ -203,6 +203,9 @@ export function WorkflowProposal({
       data-testid="workflow-proposal"
       aria-label={t("proposal.title")}
     >
+      {detail.capabilities.generate && (
+        <OpenPackageFindings items={view?.openFindings} workflowPath={path} />
+      )}
       <AuthoringStageFinding basePath={basePath} path={path} stage="proposal" />
       {failure && <Alert type="error" showIcon title={failure} />}
       {!view ? (
@@ -493,3 +496,4 @@ export function WorkflowProposal({
     </section>
   );
 }
+import { OpenPackageFindings } from "../../components/OpenPackageFindings.js";

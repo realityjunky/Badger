@@ -45,7 +45,10 @@ export function WorkflowNotice({
   );
 }
 
-export type WorkflowFormValues = WorkflowFrame & { groupId: string };
+export type WorkflowFormValues = WorkflowFrame & {
+  groupId: string;
+  engineerEmail?: string;
+};
 
 /** The workflow captured when opened supplies the revision, even after a conflict. */
 export function WorkflowDialog({
@@ -144,6 +147,19 @@ export function WorkflowDialog({
           >
             <Input maxLength={64} autoComplete="off" />
           </Form.Item>
+          {workflow === null && (
+            <Form.Item
+              name="engineerEmail"
+              label={t("finding.engineer")}
+              rules={[{ type: "email" }]}
+            >
+              <Input
+                type="email"
+                maxLength={254}
+                placeholder={t("finding.creator")}
+              />
+            </Form.Item>
+          )}
           <Form.Item name="goal" label={t("workflow.goal")} rules={required}>
             <Input.TextArea rows={3} maxLength={4000} />
           </Form.Item>

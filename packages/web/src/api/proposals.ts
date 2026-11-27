@@ -19,6 +19,7 @@ export interface Proposal {
   }[];
 }
 export interface ProposalView {
+  openFindings?: { id: string; problem: string }[];
   proposal: Proposal | null;
   planVersionHash: string | null;
   confirmation: GateConfirmation | null;

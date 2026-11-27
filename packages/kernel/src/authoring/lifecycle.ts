@@ -45,6 +45,8 @@ import {
   validateAuthoringReviewInput,
 } from "./review.js";
 import { concernsDeferredToEvaluation } from "./concerns.js";
+import { parseFindingDisposition } from "./findings.js";
+import { retainLocalFindingReport } from "./finding-history.js";
 import { AUTHORING_EVALUATION_CHECKS } from "./types.js";
 import type {
   AuthoringArtifactEvidence,
@@ -332,6 +334,7 @@ export const hashAuthoringSessionInput = authoringInputHash;
 
 function canonicalRecord(record: AuthoringRecord): unknown {
   return {
+    ...(record.schemaVersion === 2 && { schemaVersion: 2 }),
     ...(record.revision !== undefined ? { revision: record.revision } : {}),
     workflow: record.workflow,
     lane: record.lane,
@@ -368,6 +371,9 @@ function canonicalRecord(record: AuthoringRecord): unknown {
       ? {
           findings: record.findings.map((finding) => ({
             severity: finding.severity,
+            ...(finding.disposition
+              ? { disposition: finding.disposition }
+              : {}),
             ...(finding.path ? { path: finding.path } : {}),
             ...(finding.claim ? { claim: finding.claim } : {}),
             problem: finding.problem,
@@ -1194,6 +1200,13 @@ function validateFindingList(value: unknown, label: string): string[] {
       findings.push(`${label}[${index}].severity is invalid`);
     if (!boundedText(item.problem))
       findings.push(`${label}[${index}].problem is invalid`);
+    if (item.disposition !== undefined) {
+      try {
+        parseFindingDisposition(item.disposition);
+      } catch (error) {
+        findings.push(String(error));
+      }
+    }
     for (const field of ["path", "claim"] as const) {
       if (item[field] !== undefined && !safeRelativePath(item[field]))
         findings.push(`${label}[${index}].${field} is invalid`);
@@ -1310,8 +1323,8 @@ export function validateAuthoringRecord(
   const findings: string[] = [];
   if (record.lane !== laneValue)
     findings.push(`authoring record lane mismatch: ${String(record.lane)}`);
-  if (record.schemaVersion !== 1)
-    findings.push("authoring record schemaVersion must be 1");
+  if (record.schemaVersion !== 1 && record.schemaVersion !== 2)
+    findings.push("Unknown authoring record schemaVersion");
   if (record.kind !== "authoring-record")
     findings.push("authoring record kind is invalid");
   if (record.workflow !== plan.name)
@@ -1362,7 +1375,19 @@ export function validateAuthoringRecord(
     action: record.action as AuthoringRecordInput["action"],
   });
   try {
-    normalizeLaneAction(record.action, status, plan, laneValue);
+    const submitted = [
+      ...(Array.isArray(record.findings) ? record.findings : []),
+      ...(isRecord(record.review) && Array.isArray(record.review.findings)
+        ? record.review.findings
+        : []),
+    ];
+    if (
+      record.schemaVersion !== 2 ||
+      !submitted.length ||
+      record.action ||
+      submitted.some((f) => !isRecord(f) || !f.disposition)
+    )
+      normalizeLaneAction(record.action, status, plan, laneValue);
   } catch (error) {
     findings.push(error instanceof Error ? error.message : String(error));
   }
@@ -1584,6 +1609,9 @@ function normalizedFinding(
   if (findings.length) throw new Error(findings.join("; "));
   return {
     severity: value.severity as AuthoringLaneFinding["severity"],
+    ...(value.disposition !== undefined
+      ? { disposition: parseFindingDisposition(value.disposition) }
+      : {}),
     ...(value.path !== undefined ? { path: value.path as string } : {}),
     ...(value.claim !== undefined ? { claim: value.claim as string } : {}),
     problem: value.problem as string,
@@ -1987,6 +2015,12 @@ function normalizeLaneOutput(
 ): AuthoringRecordInput {
   if (!isRecord(value))
     throw new Error("Authoring lane output must be an object");
+  if (
+    value.schemaVersion !== undefined &&
+    value.schemaVersion !== 1 &&
+    value.schemaVersion !== 2
+  )
+    throw new Error("Unsupported authoring lane output schema version");
   if (value.lane !== undefined && value.lane !== expectedLane)
     throw new Error(
       `Authoring lane output lane mismatch: expected ${expectedLane}`,
@@ -2068,8 +2102,19 @@ function normalizeLaneOutput(
     !HASH_PATTERN.test(String(semanticDossierHash))
   )
     throw new Error("Authoring lane output semanticDossierHash is invalid");
-  const action = normalizeLaneAction(value.action, status, plan, expectedLane);
+  const reportedFindings = [...findings, ...(review?.findings ?? [])];
+  const routed = value.schemaVersion === 2 && reportedFindings.length > 0;
+  if (
+    value.schemaVersion === 2 &&
+    reportedFindings.some((finding) => !finding.disposition)
+  )
+    throw new Error("Version 2 findings each need their own disposition");
+  const action =
+    routed && !value.action
+      ? undefined
+      : normalizeLaneAction(value.action, status, plan, expectedLane);
   return {
+    ...(value.schemaVersion === 2 && { schemaVersion: 2 }),
     status: status as AuthoringStatus,
     claims,
     artifacts,
@@ -3029,7 +3074,7 @@ export async function recordAuthoring(options: {
       throw new Error("Authoring record summary is missing or too large");
     const prior = current.authoring;
     const record: AuthoringRecord = {
-      schemaVersion: 1,
+      schemaVersion: input.schemaVersion ?? 1,
       kind: "authoring-record",
       revision: prior.revision + 1,
       workflow: currentPlan.name,
@@ -3125,6 +3170,7 @@ export async function recordAuthoring(options: {
       current.status = "generated";
       await writeSessionSummary(current);
       await writeState(current);
+      await retainLocalFindingReport(current, record);
     } catch (error) {
       let rollbackError: unknown;
       for (const [file, content] of previousFiles) {
@@ -4363,6 +4409,7 @@ export async function assemblePackage(
     try {
       const scaffold = await generatePackage({
         proposal: current.confirmedProposal!,
+        implementationFiles: current.generated?.implementationFiles,
         plan: factoryPlan,
         destination: stagingRoot,
         projectRoot: current.projectRoot,

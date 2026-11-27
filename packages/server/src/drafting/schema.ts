@@ -25,6 +25,9 @@ import {
   type ResolutionInput,
 } from "../questionnaire/resolutions.js";
 export type DraftingKind =
+  | "implement-finding"
+  | "verify-finding"
+  | "draft-dispositions"
   | "authoring-lane"
   | "review-vote"
   | "draft-questions"
@@ -40,6 +43,30 @@ export interface ImportedQuestion {
   question: QuestionContent;
 }
 export type DraftResult =
+  | {
+      implementation: {
+        summary: string;
+        changes: import("@realityjunky/badger").PackageFileChange[];
+        tests: string;
+        missing?: string;
+      };
+    }
+  | {
+      verification: {
+        subjectHash: string;
+        outcome: "passed" | "failed" | "unavailable";
+        fixture: string;
+        environment: string;
+        evidence: string;
+        receipt?: unknown;
+      };
+    }
+  | {
+      dispositions: {
+        observationIds: string[];
+        disposition: import("@realityjunky/badger").FindingDisposition;
+      }[];
+    }
   | { laneOutput: AuthoringLaneOutput }
   | {
       plan: FactoryPlan;
@@ -197,6 +224,55 @@ const SOURCE_STUDY_SCHEMA = {
   ),
 };
 export const DRAFT_SCHEMAS = {
+  "implement-finding": object({
+    implementation: object(
+      {
+        summary: text(4000),
+        tests: text(12000),
+        missing: text(4000),
+        changes: {
+          type: "array",
+          maxItems: 40,
+          items: object({
+            path: text(400),
+            previousHash: { anyOf: [hash, { type: "null" }] },
+            content: { type: ["string", "null"], maxLength: 256000 },
+          }),
+        },
+      },
+      ["summary", "changes", "tests"],
+    ),
+  }),
+  "verify-finding": object({
+    verification: object(
+      {
+        subjectHash: hash,
+        outcome: { enum: ["passed", "failed", "unavailable"] },
+        fixture: text(4000),
+        environment: text(4000),
+        evidence: text(16000),
+        receipt: { type: "object" },
+      },
+      ["subjectHash", "outcome", "fixture", "environment", "evidence"],
+    ),
+  }),
+  "draft-dispositions": object({
+    dispositions: {
+      type: "array",
+      minItems: 1,
+      maxItems: 100,
+      items: object({
+        observationIds: {
+          type: "array",
+          minItems: 1,
+          maxItems: 100,
+          uniqueItems: true,
+          items: hash,
+        },
+        disposition: { type: "object" },
+      }),
+    },
+  }),
   "draft-questions": QUESTION_DRAFT_SCHEMA,
   "draft-follow-ups": QUESTION_DRAFT_SCHEMA,
   "authoring-lane": object({ laneOutput: { type: "object" } }),
@@ -256,6 +332,12 @@ export function validateDraftResult(
       `The result does not match the job's output schema: ${ajv.errorsText(valid.errors)}`,
     );
   const input = objectInput(result);
+  if (
+    kind === "implement-finding" ||
+    kind === "verify-finding" ||
+    kind === "draft-dispositions"
+  )
+    return input as DraftResult;
   if (kind === "authoring-lane" || kind === "review-vote")
     return { laneOutput: input.laneOutput as AuthoringLaneOutput };
   if (kind === "draft-plan")

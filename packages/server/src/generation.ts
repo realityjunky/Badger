@@ -101,6 +101,7 @@ export async function runGeneration(
       !loaded ||
       !state ||
       !confirmation ||
+      confirmation.boundHashes.implementation !== inputs.implementationHash ||
       state.hash !== job.creatorStateHash ||
       approval?.id !== job.proposalConfirmationId ||
       loaded.plan.hash !== job.planVersionHash ||
@@ -136,6 +137,7 @@ export async function runGeneration(
         confirmed: true,
       });
       generated = await generateFromApprovedProposal({
+        implementationFiles: inputs.implementationFiles,
         projectRoot: loaded.root,
         name: loaded.proposal.name,
         stateNamespace: namespace,
@@ -170,8 +172,8 @@ export async function runGeneration(
       "Package regeneration superseded later work",
     );
     await tx.query(
-      `insert into workflow_packages (id, workflow_version_id, generation_job_id, generation_confirmation_id, plan_version_hash, proposal_hash, state_hash, scaffold_hash, package_path, inventory, authoring_plan, generated_at)
-      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12)`,
+      `insert into workflow_packages (id, workflow_version_id, generation_job_id, generation_confirmation_id, plan_version_hash, proposal_hash, state_hash, scaffold_hash, package_path, inventory, authoring_plan, generated_at,implementation_files)
+      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13)`,
       [
         dependencies.ids.next(),
         job.workflowVersionId,
@@ -188,6 +190,7 @@ export async function runGeneration(
         JSON.stringify(generated.generated.inventory),
         JSON.stringify(authoringPlan),
         dependencies.clock.now(),
+        JSON.stringify(inputs.implementationFiles),
       ],
     );
     await tx.query(

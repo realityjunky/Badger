@@ -50,6 +50,9 @@ import {
 const PATH =
   /^\/api\/v1\/workflows\/([^/]+)\/versions\/([^/]+)\/drafting-jobs(?:\/([^/]+)(?:\/(prompt|claim|submit|finish|renew|release|review|review-claim|reconcile-plan|request-plan-repair|return-plan|accept-preview|accept|reject-preview|reject))?)?$/u;
 const REQUEST_FIELDS: Record<DraftingKind, string[]> = {
+  "implement-finding": [],
+  "verify-finding": [],
+  "draft-dispositions": [],
   "draft-questions": ["roundId"],
   "draft-follow-ups": ["roundId", "parentQuestionId"],
   "source-study": ["skillId"],
@@ -203,7 +206,15 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
         (body.kind !== "draft-plan" && !Object.hasOwn(DRAFT_SCHEMAS, body.kind))
       )
         throw new RequestError(400, "Choose a supported drafting job kind");
-      if (body.kind === "authoring-lane" || body.kind === "review-vote")
+      if (
+        [
+          "authoring-lane",
+          "review-vote",
+          "implement-finding",
+          "verify-finding",
+          "draft-dispositions",
+        ].includes(body.kind)
+      )
         throw new RequestError(
           400,
           "Request Authoring lanes from the Package stage",
@@ -364,7 +375,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
       )
         return { status: 200, value: { job: publicDraftingJob(job) } };
       if (
-        !job.context_bundle.planRepair ||
+        (!job.context_bundle.planRepair && !job.context_bundle.findingWork) ||
         job.status !== "submitted" ||
         revision !== job.revision
       )

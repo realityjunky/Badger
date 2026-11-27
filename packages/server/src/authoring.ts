@@ -1,6 +1,11 @@
 import { invalidateEvaluations } from "./package-invalidation.js";
 import { invalidateGate } from "./gates.js";
 import { promises as fs } from "node:fs";
+import {
+  findingHandoff,
+  findingGate,
+  type FindingWorkContext,
+} from "./findings.js";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { readPromptTemplate } from "./prompt-templates.js";
@@ -34,6 +39,7 @@ import { RequestError } from "./http/errors.js";
 import { createRound, saveQuestion } from "./questionnaire/store.js";
 import {
   auditJob,
+  finishInbox,
   publicDraftingJob,
   readDraftingJobs,
   type DraftingActor,
@@ -282,6 +288,13 @@ async function boundedBundle(
       `inputs/${i}-${path.basename(file)}`,
     ]),
   );
+  const implementationHashes = new Map<string, string>();
+  for (const file of loaded.saved.implementation_files) {
+    const absolute = path.join(loaded.state.generated!.packageRoot, file.path);
+    const inputPath = "inputs/package/" + file.path;
+    aliases.set(absolute, inputPath);
+    implementationHashes.set(inputPath, sha(file.content));
+  }
   aliases.set(outputPath, "result.json");
   const portable = (value: unknown) =>
     portablePaths(loaded.root, value, aliases);
@@ -303,7 +316,15 @@ async function boundedBundle(
       file === handoff.confirmedProposal.path
     )
       text = JSON.stringify(portable(JSON.parse(text)), null, 2);
-    files.push({ path: aliases.get(file)!, text, hash: sha(text) });
+    const inputPath = aliases.get(file)!;
+    const hash = sha(text);
+    const reviewed = implementationHashes.get(inputPath);
+    if (reviewed !== undefined && reviewed !== hash)
+      throw new RequestError(
+        409,
+        "A generated implementation file differs from the reviewed package source",
+      );
+    files.push({ path: inputPath, text, hash });
   }
   const projectedHandoff = portable(handoff) as typeof handoff;
   const proposal = files.find(
@@ -338,6 +359,7 @@ export async function requestLaneJobs(
   repairLane?: AuthoringLaneId,
   excludedJobId?: string,
   expectedAuthoringRevision?: number,
+  findingWork?: FindingWorkContext,
 ) {
   const loaded = await loadAuthoring(tx, config, versionId);
   assertCurrentGenerator(loaded.state);
@@ -378,14 +400,21 @@ export async function requestLaneJobs(
     if (repairLane && lane !== repairLane) continue;
     if (!repairLane && loaded.readiness.completedLanes.includes(lane)) continue;
     const action = loaded.readiness.records[lane]?.action;
-    if (action?.target || action?.kind === "bug") continue;
+    if (!findingWork && (action?.target || action?.kind === "bug")) continue;
+    const activeJob = jobs.find(
+      (j) =>
+        j.id !== excludedJobId &&
+        j.package_id === loaded.saved.id &&
+        j.lane_id === lane &&
+        ["queued", "claimed", "submitted"].includes(j.status),
+    );
     if (
-      jobs.some(
-        (j) =>
-          j.id !== excludedJobId &&
-          j.package_id === loaded.saved.id &&
-          j.lane_id === lane &&
-          ["queued", "claimed", "submitted"].includes(j.status),
+      activeJob &&
+      !(
+        findingWork &&
+        activeJob.status === "queued" &&
+        !activeJob.result_hash &&
+        !activeJob.context_bundle.findingWork
       )
     )
       continue;
@@ -395,13 +424,39 @@ export async function requestLaneJobs(
       lane,
     });
     if (!decision.allowed) continue;
+    if (activeJob) {
+      const updated = (
+        await tx.query<DraftingJobRow>(
+          "update drafting_jobs set status='cancelled', revision=revision+1, updated_at=$2 where id=$1 returning *",
+          [activeJob.id, deps.clock.now()],
+        )
+      ).rows[0]!;
+      await auditJob(
+        tx,
+        deps,
+        actor,
+        updated,
+        "cancelled",
+        activeJob.revision,
+        "Replaced the queued lane job with its reviewed finding assignment",
+      );
+      await finishInbox(tx, deps, activeJob.id);
+    }
     const id = deps.ids.next();
-    const authoring = await boundedBundle(loaded, lane, id);
+    const bundleInputs = await boundedBundle(loaded, lane, id);
+    const { history, files } = await findingHandoff(tx, versionId, lane);
+    const authoring = {
+      ...bundleInputs,
+      findingHistory: history,
+      findingHistoryHash: canonicalHash(history),
+      files: [...bundleInputs.files, ...files],
+    };
     const context = {
       workflow: bundle.workflow,
       version: bundle.version,
       pins: bundle.pins,
       authoring,
+      ...(findingWork && { findingWork }),
       promptTemplate: await readPromptTemplate(
         tx,
         lane === "skill-review" ? "review-vote" : "authoring-lane",
@@ -487,12 +542,10 @@ export function validateLaneResult(job: DraftingJobRow, result: unknown) {
       output.status === "DONE_WITH_CONCERNS" &&
       (!Array.isArray(output.findings) ||
         !output.findings.length ||
-        output.findings.some(
-          (finding) =>
-            typeof finding?.owner !== "string" ||
-            !finding.owner.trim() ||
-            typeof finding?.fix !== "string" ||
-            !finding.fix.trim(),
+        output.findings.some((finding) =>
+          output.schemaVersion === 2
+            ? !finding?.disposition?.acceptance
+            : !finding?.owner?.trim() || !finding?.fix?.trim(),
         ))
     )
       findings.push("Give each concern an owner and a next action");
@@ -542,6 +595,7 @@ async function replayAuthoring(
     confirmed: true,
   });
   const { state } = await generateFromApprovedProposal({
+    implementationFiles: loaded.saved.implementation_files,
     projectRoot: loaded.root,
     name: loaded.state.name,
     stateNamespace: namespace,
@@ -745,7 +799,11 @@ export async function acceptLaneResult(
   );
   const action = record.action;
   let followUp;
+  const routed =
+    output.schemaVersion === 2 &&
+    Boolean(output.findings?.length || output.review?.findings?.length);
   if (
+    !routed &&
     (record.status === "BLOCKED" || record.status === "DONE_WITH_CONCERNS") &&
     action?.target
   ) {
@@ -753,7 +811,7 @@ export async function acceptLaneResult(
       ...action,
       target: action.target,
     });
-  } else if (record.status === "NEEDS_CONTEXT") {
+  } else if (record.status === "NEEDS_CONTEXT" && !routed) {
     const round = await createRound(
       tx,
       deps,
@@ -789,7 +847,7 @@ export async function acceptLaneResult(
       "insert into authoring_follow_ups (job_id,package_id,lane_id,question_id) values ($1,$2,$3,$4)",
       [job.id, loaded.saved.id, job.lane_id, question.id],
     );
-  } else if (record.status === "BLOCKED" && action?.kind !== "bug") {
+  } else if (record.status === "BLOCKED" && action?.kind !== "bug" && !routed) {
     const [repair] = await requestLaneJobs(
       tx,
       config,
@@ -826,6 +884,11 @@ export async function assemblyPreview(
     state: loaded.state,
     operation: "assemble",
   });
+  const outstanding = await findingGate(tx, versionId, "assembly");
+  if (outstanding.blockers.length)
+    throw new RequestError(409, "Resolve the findings due before assembly", {
+      blockers: outstanding.blockers,
+    });
   if (
     !inputs.current ||
     loaded.saved.invalidated_at !== null ||
@@ -840,6 +903,7 @@ export async function assemblyPreview(
     packageId: loaded.saved.id,
     stateHash: loaded.persisted.hash,
     revision: loaded.state.authoring!.revision,
+    ...(outstanding.hash && { findingHash: outstanding.hash }),
   };
   return { ...bound, confirmationHash: canonicalHash(bound) };
 }

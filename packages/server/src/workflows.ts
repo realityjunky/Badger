@@ -244,7 +244,7 @@ export async function createWorkflow(
   database: Database,
   dependencies: ServiceDependencies,
   context: WriteContext,
-  input: WorkflowFrame & { groupId: string },
+  input: WorkflowFrame & { groupId: string; engineerEmail?: string },
   person: Person,
 ): Promise<CreateWorkflowResult> {
   return database.transaction(async (tx) => {
@@ -285,14 +285,39 @@ export async function createWorkflow(
       {
         scopeType: "workflow",
         scopeId: workflow.id,
-        email: person.email,
+        email: input.engineerEmail || person.email,
         role: "Workflow owner",
-        personId: person.id,
+        ...(input.engineerEmail &&
+        input.engineerEmail.toLowerCase() !== person.email.toLowerCase()
+          ? {}
+          : { personId: person.id }),
       },
-      "Workflow creator assigned as Workflow owner",
+      input.engineerEmail
+        ? "Selected workflow Engineer assigned approval permissions"
+        : "Workflow creator assigned as Workflow owner",
     );
     if (owner.kind !== "created")
       throw new Error("Could not assign the workflow's owner");
+    if (input.engineerEmail !== undefined) {
+      const engineer = await recordBinding(
+        tx,
+        dependencies,
+        context,
+        {
+          scopeType: "workflow",
+          scopeId: workflow.id,
+          email: input.engineerEmail || person.email,
+          role: "Engineer",
+          ...(!input.engineerEmail ||
+          input.engineerEmail.toLowerCase() === person.email.toLowerCase()
+            ? { personId: person.id }
+            : {}),
+        },
+        "Assigned workflow setup and approvals to one Engineer",
+      );
+      if (engineer.kind !== "created")
+        throw new Error("Could not assign the workflow Engineer");
+    }
     return {
       kind: "created",
       workflow,

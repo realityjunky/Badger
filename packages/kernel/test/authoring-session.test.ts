@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { promises as fs } from "node:fs";
+import { localFindingHandoff } from "../src/authoring/finding-history.js";
 import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -512,6 +513,15 @@ describe("resumable authoring session", () => {
       sourceEvidenceHash: plan.sourceEvidenceHash,
     });
     expect(record.findings).toHaveLength(1);
+    const history = await localFindingHandoff(state, "script");
+    expect(history).toContainEqual(
+      expect.objectContaining({
+        lane: "script",
+        finding: expect.objectContaining({
+          problem: "Fixture uses the bundled adapter.",
+        }),
+      }),
+    );
 
     const recovered = await readState(project, state.name);
     const readiness = await authoringReadiness(recovered);
