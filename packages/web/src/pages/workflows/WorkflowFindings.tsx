@@ -11,7 +11,7 @@ import {
   Spin,
   Tag,
 } from "antd";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import type {
   AuthoringLaneFinding,
   FindingDisposition,
@@ -27,6 +27,10 @@ const translations = {
   en: {
     observations: "Lane observations",
     findings: "Findings",
+    writerFindings: "Findings from this writer job",
+    allFindings: "Show all package findings",
+    mapBehavior: "Open executable behavior",
+    mappedPlan: "Edit workflow map",
     work: "Dispatched work",
     empty: "No findings have been reported.",
     group: "Review grouping",
@@ -87,6 +91,10 @@ const translations = {
   zh: {
     observations: "分道观察",
     findings: "待解决问题",
+    writerFindings: "本次编写任务的问题",
+    allFindings: "查看工作流包的全部问题",
+    mapBehavior: "打开执行规则",
+    mappedPlan: "编辑工作流映射",
     work: "已派发工作",
     empty: "尚无问题报告。",
     group: "审核分组",
@@ -218,12 +226,14 @@ export function WorkflowFindings({
   basePath,
   path,
   onChanged,
+  mapped = false,
 }: {
+  mapped?: boolean;
   basePath: string;
   path: string;
   onChanged(): void;
 }) {
-  const { locale } = useI18n(),
+  const { locale, t } = useI18n(),
     words = translations[locale === "zh" ? "zh" : "en"];
   const [view, setView] = useState<View | null>(null),
     [failure, setFailure] = useState(""),
@@ -246,13 +256,16 @@ export function WorkflowFindings({
   const [form] = Form.useForm<FindingDisposition>();
   const route = Form.useWatch("route", form);
   const location = useLocation();
-  const requestedId = new URLSearchParams(location.search).get("finding");
+  const query = new URLSearchParams(location.search);
+  const requestedId = query.get("finding");
+  const writerJob = query.get("findingJob");
+  const listId = useId();
   useEffect(() => {
     if (requestedId && view?.findings.some((item) => item.id === requestedId))
       document
-        .getElementById("finding-" + requestedId)
+        .getElementById(listId + "-" + requestedId)
         ?.scrollIntoView({ block: "nearest" });
-  }, [requestedId, view?.hash]);
+  }, [listId, requestedId, view?.hash]);
   const [signed, setSigned] = useState(false);
   const [supersede, setSupersede] = useState<string | null>(null);
   const [adoption, setAdoption] = useState<Work | null>(null);
@@ -326,6 +339,18 @@ export function WorkflowFindings({
   }
   const selected =
     view?.findings.filter((item) => findingIds.includes(item.id)) ?? [];
+  const observations =
+    view?.observations.filter(
+      (item) => !writerJob || item.job_id === writerJob,
+    ) ?? [];
+  const linkedFindings = new Set(
+    observations.flatMap((item) => item.finding_ids),
+  );
+  const work =
+    view?.work.filter(
+      (job) =>
+        !writerJob || job.finding_ids.some((id) => linkedFindings.has(id)),
+    ) ?? [];
   const currentFindings =
     view?.findings.filter(
       (item) =>
@@ -335,6 +360,11 @@ export function WorkflowFindings({
             observation.current && observation.finding_ids.includes(item.id),
         ),
     ) ?? [];
+  const visibleFindings = writerJob
+    ? currentFindings.filter((item) => linkedFindings.has(item.id))
+    : currentFindings;
+  const allFindingsQuery = new URLSearchParams(location.search);
+  allFindingsQuery.delete("findingJob");
   const dispatch = (kind?: string) =>
     perform(async () => {
       const result = await command({ action: "dispatch", kind, findingIds });
@@ -402,6 +432,16 @@ export function WorkflowFindings({
   if (!view && !failure) return <Spin />;
   return (
     <section aria-label={words.findings}>
+      {writerJob && (
+        <p>
+          {words.writerFindings} ·{" "}
+          <Link
+            to={{ search: allFindingsQuery.toString(), hash: location.hash }}
+          >
+            {words.allFindings}
+          </Link>
+        </p>
+      )}
       {!!waiting.length && (
         <Alert
           type="info"
@@ -441,6 +481,7 @@ export function WorkflowFindings({
             selected.some(
               (item) =>
                 !item.reviewed ||
+                (mapped && item.disposition?.route === "plan") ||
                 !["implementation", "verification", "plan", "lane"].includes(
                   item.disposition?.route ?? "",
                 ),
@@ -468,26 +509,27 @@ export function WorkflowFindings({
       </Space>
       {view && (
         <>
-          {view.existingRepairs?.map((job) => (
-            <Space key={job.id} wrap>
-              <Link to={{ search: "?planDraft=" + job.id, hash: "#plan" }}>
-                {words.repair}
-              </Link>
-              <Tag>{job.status}</Tag>
-              <Button
-                disabled={busy || job.status === "claimed"}
-                size="small"
-                onClick={() => setSupersede(job.id)}
-              >
-                {words.replace}
-              </Button>
-            </Space>
-          ))}
+          {!writerJob &&
+            view.existingRepairs?.map((job) => (
+              <Space key={job.id} wrap>
+                <Link to={{ search: "?planDraft=" + job.id, hash: "#plan" }}>
+                  {words.repair}
+                </Link>
+                <Tag>{job.status}</Tag>
+                <Button
+                  disabled={busy || job.status === "claimed"}
+                  size="small"
+                  onClick={() => setSupersede(job.id)}
+                >
+                  {words.replace}
+                </Button>
+              </Space>
+            ))}
           <h4>{words.observations}</h4>
           <List
             size="small"
             locale={{ emptyText: words.empty }}
-            dataSource={view.observations}
+            dataSource={observations}
             renderItem={(item) => (
               <List.Item>
                 <div>
@@ -536,9 +578,9 @@ export function WorkflowFindings({
           <List
             size="small"
             locale={{ emptyText: words.empty }}
-            dataSource={currentFindings}
+            dataSource={visibleFindings}
             renderItem={(item) => (
-              <List.Item id={"finding-" + item.id}>
+              <List.Item id={listId + "-" + item.id}>
                 <div>
                   <Checkbox
                     checked={findingIds.includes(item.id)}
@@ -554,10 +596,30 @@ export function WorkflowFindings({
                   <Tag>{words[item.status]}</Tag>
                   {item.disposition && (
                     <div>
-                      {words[item.disposition.route]} ·{" "}
-                      <code>{item.disposition.target}</code>
+                      {mapped && item.disposition.route === "plan"
+                        ? words.mappedPlan
+                        : words[item.disposition.route]}{" "}
+                      · <code>{item.disposition.target}</code>
                       <p>{item.disposition.acceptance}</p>
+                      {item.disposition.due && (
+                        <p>
+                          {t("mapping.evidenceDue")}{" "}
+                          {t(`mapping.due.${item.disposition.due}`)}
+                        </p>
+                      )}
                     </div>
+                  )}
+                  {mapped && item.disposition?.route === "plan" && (
+                    <Link
+                      to={{
+                        search:
+                          "?mapTab=contract&finding=" +
+                          encodeURIComponent(item.id),
+                        hash: "mapping",
+                      }}
+                    >
+                      {words.mapBehavior}
+                    </Link>
                   )}
                   {item.disposition &&
                     ["sources", "dossier", "proposal"].includes(
@@ -661,12 +723,12 @@ export function WorkflowFindings({
               </List.Item>
             )}
           />
-          {!!view.work.length && (
+          {!!work.length && (
             <>
               <h4>{words.work}</h4>
               <List
                 size="small"
-                dataSource={view.work}
+                dataSource={work}
                 renderItem={(job) => (
                   <List.Item>
                     <Space wrap>
@@ -775,7 +837,8 @@ export function WorkflowFindings({
             <Select
               options={routes.map((route) => ({
                 value: route,
-                label: words[route],
+                label:
+                  mapped && route === "plan" ? words.mappedPlan : words[route],
               }))}
             />
           </Form.Item>

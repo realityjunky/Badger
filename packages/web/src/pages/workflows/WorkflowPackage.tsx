@@ -192,9 +192,20 @@ export function WorkflowPackage({
               label: t("finding.title"),
               children: (
                 <WorkflowFindings
-                  key={saved.id + "-" + refresh}
+                  key={
+                    saved.id +
+                    "-" +
+                    refresh +
+                    "-" +
+                    (new URLSearchParams(location.search).get("findingJob") ??
+                      "")
+                  }
                   basePath={basePath}
                   path={path}
+                  mapped={
+                    !!saved.authoringPlan.semanticDossier?.workingDossier
+                      ?.content.contract
+                  }
                   onChanged={onChanged}
                 />
               ),

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type {
   AuthoringReadiness,
+  AuthoringLaneOutput,
   AuthoringRepairTarget,
   AuthoringWaveId,
 } from "@realityjunky/badger";
@@ -69,6 +70,116 @@ type View = {
     repairJobId: string | null;
   })[];
 };
+function LaneReportBody({ output }: { output: AuthoringLaneOutput }) {
+  const { t, format } = useI18n();
+  return (
+    <>
+      <Tag>{output.status}</Tag>
+      <p>{output.summary}</p>
+      {!!output.findings?.length && (
+        <>
+          <h4>{t("authoring.findings")}</h4>
+          <ul className="gate-pins">
+            {output.findings.map((finding, index) => (
+              <li key={index}>
+                <Tag>{t(`authoring.severity.${finding.severity}`)}</Tag>
+                {finding.path && <code>{finding.path}</code>}
+                <p>{finding.problem}</p>
+                {finding.impact && <p>{finding.impact}</p>}
+                {finding.claim && (
+                  <p>
+                    <code>{finding.claim}</code>
+                  </p>
+                )}
+                {finding.evidence?.map((entry, i) => (
+                  <p key={i}>{entry}</p>
+                ))}
+                <p>
+                  {format("authoring.owner", {
+                    owner:
+                      finding.owner ??
+                      (finding.evaluationCheck
+                        ? t("stage.evaluation")
+                        : t("authoring.engineer")),
+                  })}
+                </p>
+                {finding.disposition && (
+                  <p>
+                    {t("mapping.findingTarget")}{" "}
+                    <code>{finding.disposition.target}</code>
+                  </p>
+                )}
+                {finding.disposition?.due && (
+                  <p>
+                    {t("mapping.evidenceDue")}{" "}
+                    {t(`mapping.due.${finding.disposition.due}`)}
+                  </p>
+                )}
+                {finding.fix && <p>{finding.fix}</p>}
+                {finding.evaluationCheck && (
+                  <Link to={{ hash: "evaluation" }}>
+                    {format("authoring.evaluationCheck", {
+                      check: finding.evaluationCheck,
+                    })}
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <Collapse
+        items={[
+          {
+            key: "claims",
+            label: t("authoring.claims"),
+            children: (
+              <ul>
+                {output.claims?.map((claim) => (
+                  <li key={claim.id}>
+                    <strong>{claim.id}</strong> · {claim.status}
+                    {claim.summary && <p>{claim.summary}</p>}
+                    {claim.evidence?.map((entry, index) => (
+                      <p key={index}>{entry}</p>
+                    ))}
+                  </li>
+                ))}
+              </ul>
+            ),
+          },
+          ...(output.artifacts ?? []).map((artifact) => ({
+            key: artifact.path,
+            label: artifact.path,
+            children: (
+              <pre className="package-file-preview">{artifact.content}</pre>
+            ),
+          })),
+          ...(output.review
+            ? [
+                {
+                  key: "vote",
+                  label: t("authoring.reviewVote"),
+                  children: (
+                    <pre className="package-file-preview">
+                      {JSON.stringify(output.review, null, 2)}
+                    </pre>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+      />
+      {output.action && (
+        <Alert
+          type="info"
+          title={output.action.prompt}
+          description={output.action.requirement}
+        />
+      )}
+    </>
+  );
+}
+
 export function WorkflowAuthoring({
   basePath,
   path,
@@ -458,9 +569,14 @@ export function WorkflowAuthoring({
                         {result &&
                           ["claimed", "submitted"].includes(job.status) && (
                             <span className="muted">
-                              {format("authoring.draftOutcome", {
-                                status: result.laneOutput.status,
-                              })}
+                              {result.nodeGuidance
+                                ? format("mapping.writerOutcomes", {
+                                    entry: result.laneOutput.status,
+                                    nodes: result.nodeGuidance.status,
+                                  })
+                                : format("authoring.draftOutcome", {
+                                    status: result.laneOutput.status,
+                                  })}
                             </span>
                           )}
                       </Space>
@@ -591,7 +707,7 @@ export function WorkflowAuthoring({
       )}
       <Modal
         open={!!review}
-        title={`${review?.laneId ?? ""} · ${t("authoring.report")}`}
+        title={`${review?.result?.nodeGuidance ? t("mapping.writer") : (review?.laneId ?? "")} · ${t("authoring.report")}`}
         onCancel={() => {
           if (busy) return;
           setReview(null);
@@ -608,15 +724,39 @@ export function WorkflowAuthoring({
               >
                 {t("authoring.reject")}
               </Button>
-              <Button
-                type="primary"
-                disabled={busy}
-                onClick={() =>
-                  review && void run(() => preview(review, "accept"), true)
-                }
-              >
-                {t("authoring.accept")}
-              </Button>
+              {review?.result?.nodeGuidance ? (
+                <>
+                  <AgentPromptButton
+                    basePath={basePath}
+                    path={`${path}/drafting-jobs/${encodeURIComponent(review.id)}/prompt`}
+                  />
+                  <Link
+                    to={{
+                      search:
+                        "?" +
+                        new URLSearchParams({
+                          releaseTab: "package",
+                          packageTab: "findings",
+                          findingJob: review.id,
+                        }),
+                      hash: "release",
+                    }}
+                    onClick={() => setReview(null)}
+                  >
+                    {t("mapping.openWriterFindings")}
+                  </Link>
+                </>
+              ) : (
+                <Button
+                  type="primary"
+                  disabled={busy}
+                  onClick={() =>
+                    review && void run(() => preview(review, "accept"), true)
+                  }
+                >
+                  {t("authoring.accept")}
+                </Button>
+              )}
             </Space>
           ) : canReviseSelected ? (
             <Button
@@ -643,48 +783,24 @@ export function WorkflowAuthoring({
         width={860}
       >
         {!decision && dialogAlert}
-        <Tag>{review?.result?.laneOutput.status}</Tag>
-        <p>{review?.result?.laneOutput.summary}</p>
-        {!!review?.result?.laneOutput.findings?.length && (
-          <>
-            <h4>{t("authoring.findings")}</h4>
-            <ul className="gate-pins">
-              {review.result.laneOutput.findings.map((finding, index) => (
-                <li key={index}>
-                  <Tag>{t(`authoring.severity.${finding.severity}`)}</Tag>
-                  {finding.path && <code>{finding.path}</code>}
-                  <p>{finding.problem}</p>
-                  {finding.impact && <p>{finding.impact}</p>}
-                  {finding.claim && (
-                    <p>
-                      <code>{finding.claim}</code>
-                    </p>
-                  )}
-                  {finding.evidence?.map((entry, i) => (
-                    <p key={i}>{entry}</p>
-                  ))}
-                  <p>
-                    {format("authoring.owner", {
-                      owner:
-                        finding.owner ??
-                        (finding.evaluationCheck
-                          ? t("stage.evaluation")
-                          : t("authoring.engineer")),
-                    })}
-                  </p>
-                  {finding.fix && <p>{finding.fix}</p>}
-                  {finding.evaluationCheck && (
-                    <Link to={{ hash: "evaluation" }}>
-                      {format("authoring.evaluationCheck", {
-                        check: finding.evaluationCheck,
-                      })}
-                    </Link>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </>
+        {canReviewSelected && review?.result?.nodeGuidance && (
+          <Alert type="info" showIcon title={t("mapping.writerFollowUp")} />
         )}
+        {review?.result &&
+          (review.result.nodeGuidance ? (
+            <>
+              <section aria-label={t("mapping.entrySkill")}>
+                <h4>{t("mapping.entrySkill")}</h4>
+                <LaneReportBody output={review.result.laneOutput} />
+              </section>
+              <section aria-label={t("mapping.nodeGuidance")}>
+                <h4>{t("mapping.nodeGuidance")}</h4>
+                <LaneReportBody output={review.result.nodeGuidance} />
+              </section>
+            </>
+          ) : (
+            <LaneReportBody output={review.result.laneOutput} />
+          ))}
         {canReviseSelected && <p>{t("authoring.requestRevisionHelp")}</p>}
         {reviewFollowUp?.stage && (
           <Link
@@ -695,60 +811,6 @@ export function WorkflowAuthoring({
               stage: t(stageLabels[reviewFollowUp.stage]),
             })}
           </Link>
-        )}
-        <Collapse
-          items={[
-            {
-              key: "claims",
-              label: t("authoring.claims"),
-              children: (
-                <ul>
-                  {review?.result?.laneOutput.claims?.map((claim) => (
-                    <li key={claim.id}>
-                      <strong>{claim.id}</strong> · {claim.status}
-                      {claim.summary && <p>{claim.summary}</p>}
-                      {claim.evidence?.map((entry, index) => (
-                        <p key={index}>{entry}</p>
-                      ))}
-                    </li>
-                  ))}
-                </ul>
-              ),
-            },
-            ...(review?.result?.laneOutput.artifacts ?? [])
-              .concat(review?.result?.nodeGuidance?.artifacts ?? [])
-              .map((artifact) => ({
-                key: artifact.path,
-                label: artifact.path,
-                children: (
-                  <pre className="package-file-preview">{artifact.content}</pre>
-                ),
-              })),
-            ...(review?.result?.laneOutput.review
-              ? [
-                  {
-                    key: "vote",
-                    label: t("authoring.reviewVote"),
-                    children: (
-                      <pre className="package-file-preview">
-                        {JSON.stringify(
-                          review.result.laneOutput.review,
-                          null,
-                          2,
-                        )}
-                      </pre>
-                    ),
-                  },
-                ]
-              : []),
-          ]}
-        />
-        {review?.result?.laneOutput.action && (
-          <Alert
-            type="info"
-            title={review.result.laneOutput.action.prompt}
-            description={review.result.laneOutput.action.requirement}
-          />
         )}
         {canReviewSelected && (
           <>

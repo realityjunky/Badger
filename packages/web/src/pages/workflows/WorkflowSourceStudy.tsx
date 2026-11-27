@@ -41,6 +41,7 @@ import { WorkflowPanel } from "./WorkflowPanel.js";
 import { selectedWorkflowTab } from "./WorkflowTabs.js";
 import { useWorkingDossier } from "../working-dossier/useWorkingDossier.js";
 import { WorkingDossierStudy } from "../working-dossier/WorkingDossierStudy.js";
+import { WorkflowFindings } from "./WorkflowFindings.js";
 
 export function WorkflowSourceStudy({
   basePath,
@@ -106,6 +107,31 @@ export function WorkflowSourceStudy({
   }, [linkedId, linkedKind, linkedStatus]);
 
   const canManage = detail.capabilities.manageSourceStudy;
+  const hasPackageFindings =
+    detail.capabilities.generate &&
+    detail.jobs.some(
+      (job) => job.kind === "generate" && job.status === "succeeded",
+    );
+  const mapQuery = new URLSearchParams(search);
+  const requestedView = mapQuery.get("mapTab");
+  const relatedFinding = mapQuery.get("finding");
+  const mapView =
+    requestedView &&
+    [
+      "map",
+      "evidence",
+      "contract",
+      ...(hasPackageFindings ? ["findings"] : []),
+    ].includes(requestedView)
+      ? requestedView
+      : selectedWorkflowTab({ hash, search }) === "dossier"
+        ? "evidence"
+        : "map";
+  function selectMapView(key: string) {
+    const params = new URLSearchParams(search);
+    params.set("mapTab", key);
+    navigate({ search: params.toString(), hash: "mapping" });
+  }
   const legacy = dossier?.legacy === true;
   const ready =
     detail.version.stages.find((s) => s.id === "sources")?.state === "done";
@@ -447,11 +473,8 @@ export function WorkflowSourceStudy({
           )}
           {dossier && mapped && (dossier.available || dossier.revision > 0) ? (
             <Tabs
-              defaultActiveKey={
-                selectedWorkflowTab({ hash, search }) === "dossier"
-                  ? "evidence"
-                  : "map"
-              }
+              activeKey={mapView}
+              onChange={selectMapView}
               items={[
                 {
                   key: "map",
@@ -504,23 +527,55 @@ export function WorkflowSourceStudy({
                   key: "contract",
                   label: t("mapping.contract"),
                   children: (
-                    <MapContractEditor
-                      key={dossier.revision}
-                      dossier={dossier}
-                      context={{
-                        basePath,
-                        path: dossierPath,
-                        revision: dossier.revision,
-                        pins: dossier.pins,
-                      }}
-                      onSaved={(updated) => {
-                        accept(updated);
-                        onChanged();
-                      }}
-                      onReload={reload}
-                    />
+                    <>
+                      {hasPackageFindings && relatedFinding && (
+                        <Link
+                          to={{
+                            search: new URLSearchParams({
+                              mapTab: "findings",
+                              finding: relatedFinding,
+                            }).toString(),
+                            hash: "mapping",
+                          }}
+                        >
+                          {t("mapping.relatedFinding")}
+                        </Link>
+                      )}
+                      <MapContractEditor
+                        key={dossier.revision}
+                        dossier={dossier}
+                        context={{
+                          basePath,
+                          path: dossierPath,
+                          revision: dossier.revision,
+                          pins: dossier.pins,
+                        }}
+                        onSaved={(updated) => {
+                          accept(updated);
+                          onChanged();
+                        }}
+                        onReload={reload}
+                      />
+                    </>
                   ),
                 },
+                ...(hasPackageFindings
+                  ? [
+                      {
+                        key: "findings",
+                        label: t("mapping.packageFindings"),
+                        children: (
+                          <WorkflowFindings
+                            key={mapQuery.get("findingJob") ?? ""}
+                            basePath={basePath}
+                            path={base}
+                            onChanged={onChanged}
+                            mapped={!!dossier.content.contract}
+                          />
+                        ),
+                      },
+                    ]
+                  : []),
               ]}
             />
           ) : (

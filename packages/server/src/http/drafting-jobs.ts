@@ -707,7 +707,7 @@ export async function handleDraftingJobs(input: AuthorizedRequest) {
     )
       throw new RequestError(
         409,
-        "Return the package writer's draft for revision or resolve the findings in workflow mapping.",
+        "Open writer findings in Build and release → Package → Findings, or use Copy Agent prompt on the submitted writer job to revise its saved draft.",
       );
     const planRepair = job.context_bundle.planRepair;
     const resultFields = draftResultFields(job.kind, !!planRepair);

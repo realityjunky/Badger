@@ -434,7 +434,7 @@ it("builds from one mapped revision, stages one writer and an independent review
       (entry: { laneId: string }) => entry.laneId === lane,
     );
     const path = base + "/drafting-jobs/" + job.id;
-    const claim = await api(
+    let claim = await api(
       path + "/claim",
       "POST",
       { revision: job.revision },
@@ -456,6 +456,69 @@ it("builds from one mapped revision, stages one writer and an independent review
         }),
       }),
     };
+    if (result.nodeGuidance) {
+      const problem = "Who can authorize recording the report?";
+      const finding = {
+        severity: "important",
+        problem,
+        disposition: {
+          route: "question",
+          subject: "Recording authority",
+          target: "/topics/guardrails",
+          authority: "Report owner",
+          acceptance: problem,
+        },
+      };
+      const { job: blocked } = await api(
+        path + "/submit",
+        "POST",
+        {
+          leaseId: claim.job.lease.id,
+          contextHash: claim.job.contextHash,
+          result: {
+            ...result,
+            nodeGuidance: {
+              ...result.nodeGuidance,
+              schemaVersion: 2,
+              status: "BLOCKED",
+              findings: [finding],
+            },
+          },
+        },
+        engineer,
+        200,
+        secret,
+      );
+      const submitted = (await call(base + "/package/authoring")).jobs;
+      expect(submitted).toMatchObject([{ id: job.id, status: "submitted" }]);
+      expect(submitted[0].staged).toBeFalsy();
+      expect(
+        (await call(base + "/package/findings")).observations,
+      ).toMatchObject([
+        {
+          job_id: job.id,
+          lane: "skill-core",
+          current: true,
+          finding: { problem },
+        },
+      ]);
+      const refused = await call(
+        path + "/accept-preview",
+        "POST",
+        { revision: blocked.revision },
+        engineer,
+        409,
+      );
+      expect(refused.error.message).toContain("Package → Findings");
+      claim = await api(
+        path + "/claim",
+        "POST",
+        { revision: blocked.revision },
+        engineer,
+        200,
+        secret,
+      );
+    }
     await api(
       path + "/submit",
       "POST",
